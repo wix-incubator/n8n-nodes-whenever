@@ -1,0 +1,52 @@
+{
+	"name": "n8n-nodes-whenever",
+	"version": "0.1.0",
+	"description": "Start Whenever workflow runs from n8n through webhooks",
+	"license": "MIT",
+	"homepage": "https://github.com/wix-incubator/n8n-nodes-whenever#readme",
+	"keywords": [
+		"n8n-community-node-package"
+	],
+	"author": {
+		"name": "Kasparas Baniulis",
+		"email": "kasparasb@wix.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/wix-incubator/n8n-nodes-whenever.git"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"test": "npm run build && node --test test/*.test.mjs",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist/nodes",
+		"dist/credentials"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/WheneverWebhookApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/Whenever/Whenever.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "0.49.1",
+		"eslint": "9.32.0",
+		"n8n-workflow": "2.16.0",
+		"prettier": "3.6.2",
+		"release-it": "19.0.4",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}
