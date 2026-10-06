@@ -61,6 +61,14 @@ test('preserves output read before the final event page', () => {
 	assert.equal(final.output, false);
 });
 
+test('preserves output while waiting for the summary to report completion', () => {
+	const first = evaluate({ ...running, outputState: 'available', output: { score: 82 } });
+	assert.equal(first.route, 'wait');
+	const final = evaluate({ ...running, status: 'succeeded' }, first);
+	assert.equal(final.route, 'success');
+	assert.deepEqual(final.output, { score: 82 });
+});
+
 test('does not settle terminal status while observation is incomplete', () => {
 	const result = evaluate({ ...running, status: 'failed', observationComplete: false });
 	assert.equal(result.route, 'wait');
