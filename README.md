@@ -2,7 +2,7 @@
 
 Start a [Whenever](https://whenever.dev) workflow run from n8n using its generic webhook URL.
 
-The **Start Workflow** operation sends your JSON input and returns the accepted `runId`:
+The **Start Workflow** operation sends JSON, form values, or text and returns the accepted `runId`:
 
 ```json
 { "runId": "example-run-id" }
@@ -26,16 +26,31 @@ There is no automatic credential test because calling this endpoint can start a 
 1. Connect a trigger or another node to **Whenever**.
 2. Select your **Whenever Webhook API** credential.
 3. Select **Start Workflow**.
-4. Enter the JSON input expected by your Whenever workflow.
-5. Execute the node.
+4. Select **Input Format**: **JSON**, **Form Values**, or **Text**.
+5. Enter the input expected by your Whenever workflow.
+6. Execute the node.
 
-Example input:
+**JSON** is the default, including for existing nodes that have no saved format selection.
+Enter JSON in **JSON Input**, for example:
 
 ```json
 { "source": "n8n", "message": "Hello from n8n" }
 ```
 
 You can also use an n8n expression such as `{{ $json }}` to supply an object.
+
+For **Form Values**, add names and values in **Form Fields**.
+The node sends these as `application/x-www-form-urlencoded`, with special characters encoded.
+For example, fields named `source` and `amount` arrive as `{ "source": "n8n", "amount": "25" }`.
+Every value arrives as a string. If names repeat, Whenever keeps the last value.
+
+For **Text**, enter text in **Text Input** or use an expression such as `{{ $json.message }}`.
+The node sends the text unchanged as `text/plain`.
+Plain text, CSV, and XML arrive as one string. The workflow must interpret the format itself.
+
+Whenever's generic webhooks have a default request limit of 64 KiB.
+This node does not upload binary files or send multipart forms.
+
 The node sends one request per incoming item. It returns one receipt per accepted request.
 The next node can access the receipt with `{{ $json.runId }}`.
 
@@ -44,7 +59,7 @@ The node requires a nonempty `runId` in either response.
 A rejection, missing `runId`, or invalid response produces an n8n error.
 An inactive workflow can return HTTP 200 without a `runId`, which also produces an error.
 
-A new execution sends a new `Idempotency-Key`, so identical JSON can intentionally start separate runs.
+A new execution sends a new `Idempotency-Key`, so identical input can intentionally start separate runs.
 Each node, loop iteration, and incoming item has a separate key.
 The node retains the original execution identity in n8n's execution context.
 **Retry On Fail** and retries from saved failed executions reuse the original keys, including when n8n assigns a new execution ID.

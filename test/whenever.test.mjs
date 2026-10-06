@@ -29,7 +29,11 @@ beforeEach(() => {
 	response = { status: 202, body: { runId: 'run-123' } };
 });
 
-function context(inputs = ['{"message":"Hello","nested":{"count":2}}'], overrides = {}) {
+function context(
+	inputs = ['{"message":"Hello","nested":{"count":2}}'],
+	overrides = {},
+	inputFormat,
+) {
 	const nodeContext = {};
 	return {
 		getContext: () => nodeContext,
@@ -38,8 +42,9 @@ function context(inputs = ['{"message":"Hello","nested":{"count":2}}'], override
 		getWorkflow: () => ({ id: 'workflow-1' }),
 		getWorkflowDataProxy: () => ({ $runIndex: 0 }),
 		getInputData: () => inputs.map(() => ({ json: {} })),
-		getNodeParameter: (name, index) => {
-			if (name === 'input') return inputs[index];
+		getNodeParameter: (name, index, fallbackValue) => {
+			if (name === 'input' || name === 'textInput' || name === 'formFields') return inputs[index];
+			if (name === 'inputFormat') return inputFormat ?? fallbackValue;
 			if (name === 'operation') return 'start';
 			throw new Error(`Unexpected parameter: ${name}`);
 		},
@@ -72,7 +77,61 @@ function context(inputs = ['{"message":"Hello","nested":{"count":2}}'], override
 	};
 }
 
-const execute = (inputs, overrides) => new Whenever().execute.call(context(inputs, overrides));
+const execute = (inputs, overrides, inputFormat) =>
+	new Whenever().execute.call(context(inputs, overrides, inputFormat));
+
+for (const [format, input] of [
+	['plain text', 'Hello, Živilė!\nSecond line'],
+	['CSV', 'name,amount\nSam,25'],
+	['XML', '<order><amount>25</amount></order>'],
+	['JSON-looking text', '{"amount":25}'],
+]) {
+	test(`sends ${format} unchanged as text`, async () => {
+		const result = await execute([input], {}, 'text');
+		assert.equal(requests[0].headers['content-type'], 'text/plain');
+		assert.equal(requests[0].body, input);
+		assert.equal(result[0][0].json.runId, 'run-123');
+	});
+}
+
+test('encodes form names and values without losing special characters or empty values', async () => {
+	const result = await execute(
+		[
+			{
+				values: [
+					{ name: 'customer & tier', value: 'Sam + Živilė' },
+					{ name: 'message', value: 'a=b&c' },
+					{ name: 'empty', value: '' },
+					{ name: 'amount', value: '25' },
+				],
+			},
+		],
+		{},
+		'form',
+	);
+	assert.equal(requests[0].headers['content-type'], 'application/x-www-form-urlencoded');
+	assert.equal(
+		requests[0].body,
+		'customer+%26+tier=Sam+%2B+%C5%BDivil%C4%97&message=a%3Db%26c&empty=&amount=25',
+	);
+	assert.equal(result[0][0].json.runId, 'run-123');
+});
+
+test('sends the form values for each incoming item separately', async () => {
+	const result = await execute(
+		[{ values: [{ name: 'amount', value: '25' }] }, { values: [{ name: 'amount', value: '50' }] }],
+		{},
+		'form',
+	);
+	assert.deepEqual(
+		requests.map((request) => request.body),
+		['amount=25', 'amount=50'],
+	);
+	assert.deepEqual(
+		result[0].map((item) => item.pairedItem),
+		[{ item: 0 }, { item: 1 }],
+	);
+});
 
 test('uses different idempotency keys for new executions with identical JSON', async () => {
 	await execute(undefined, { getExecutionId: () => 'execution-1' });

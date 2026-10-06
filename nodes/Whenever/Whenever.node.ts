@@ -7,6 +7,44 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
+function workflowRequestBody(
+	context: IExecuteFunctions,
+	itemIndex: number,
+): { body: string; contentType: string } {
+	const inputFormat = context.getNodeParameter('inputFormat', itemIndex, 'json');
+	switch (inputFormat) {
+		case 'json': {
+			const input = context.getNodeParameter('input', itemIndex) as unknown;
+			try {
+				const value: unknown = typeof input === 'string' ? JSON.parse(input) : input;
+				const body = JSON.stringify(value);
+				if (body === undefined)
+					throw new NodeOperationError(context.getNode(), 'Missing JSON input', { itemIndex });
+				return { body, contentType: 'application/json' };
+			} catch {
+				throw new NodeOperationError(context.getNode(), 'JSON Input must contain valid JSON.', {
+					itemIndex,
+				});
+			}
+		}
+		case 'form': {
+			const fields = context.getNodeParameter('formFields', itemIndex, {}) as {
+				values?: Array<{ name: string; value: string }>;
+			};
+			const form = new URLSearchParams();
+			for (const field of fields.values ?? []) form.append(field.name, field.value);
+			return { body: form.toString(), contentType: 'application/x-www-form-urlencoded' };
+		}
+		case 'text':
+			return {
+				body: context.getNodeParameter('textInput', itemIndex) as string,
+				contentType: 'text/plain',
+			};
+		default:
+			throw new NodeOperationError(context.getNode(), 'Unsupported input format.', { itemIndex });
+	}
+}
+
 export class Whenever implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Whenever',
@@ -32,7 +70,7 @@ export class Whenever implements INodeType {
 						name: 'Start Workflow',
 						value: 'start',
 						action: 'Start a workflow',
-						description: 'Send JSON to a Whenever webhook and return the accepted run ID',
+						description: 'Send input to a Whenever webhook and return the accepted run ID',
 					},
 				],
 				default: 'start',
@@ -45,13 +83,82 @@ export class Whenever implements INodeType {
 				default: '',
 			},
 			{
+				displayName: 'Input Format',
+				name: 'inputFormat',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Form Values',
+						value: 'form',
+						description: 'Named values sent as strings',
+					},
+					{
+						name: 'JSON',
+						value: 'json',
+						description: 'Structured data, including objects and arrays',
+					},
+					{
+						name: 'Text',
+						value: 'text',
+						description: 'Plain text, CSV, XML, or other text sent unchanged',
+					},
+				],
+				default: 'json',
+			},
+			{
 				displayName: 'JSON Input',
 				name: 'input',
 				type: 'json',
 				required: true,
 				default: '{}',
+				displayOptions: { show: { inputFormat: ['json'] } },
 				description:
 					'JSON sent to Whenever as the workflow input. Expressions can supply an object.',
+			},
+			{
+				displayName: 'Form Fields',
+				name: 'formFields',
+				type: 'fixedCollection',
+				typeOptions: { multipleValues: true },
+				default: {},
+				placeholder: 'Add Field',
+				displayOptions: { show: { inputFormat: ['form'] } },
+				description: 'Named values sent to Whenever. All values arrive as strings.',
+				options: [
+					{
+						displayName: 'Fields',
+						name: 'values',
+						values: [
+							{
+								displayName: 'Name',
+								name: 'name',
+								type: 'string',
+								required: true,
+								default: '',
+								description: 'The name of the form field',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+								description: 'The value of the form field',
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Text Input',
+				name: 'textInput',
+				type: 'string',
+				typeOptions: { rows: 5 },
+				required: true,
+				default: '',
+				displayOptions: { show: { inputFormat: ['text'] } },
+				description:
+					'Text sent unchanged to Whenever. The workflow must interpret CSV or XML itself.',
 			},
 		],
 	};
@@ -84,19 +191,7 @@ export class Whenever implements INodeType {
 		const results: INodeExecutionData[] = [];
 		for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
 			try {
-				const input = this.getNodeParameter('input', itemIndex) as unknown;
-				let body: string;
-				try {
-					const value: unknown = typeof input === 'string' ? JSON.parse(input) : input;
-					const serialized = JSON.stringify(value);
-					if (serialized === undefined)
-						throw new NodeOperationError(this.getNode(), 'Missing JSON input', { itemIndex });
-					body = serialized;
-				} catch {
-					throw new NodeOperationError(this.getNode(), 'JSON Input must contain valid JSON.', {
-						itemIndex,
-					});
-				}
+				const { body, contentType } = workflowRequestBody(this, itemIndex);
 
 				let response: { statusCode: number; body: unknown };
 				try {
@@ -107,7 +202,7 @@ export class Whenever implements INodeType {
 							method: 'POST',
 							url: webhookUrl,
 							headers: {
-								'Content-Type': 'application/json',
+								'Content-Type': contentType,
 								Accept: 'application/json',
 								'Idempotency-Key': createHash('sha256')
 									.update(JSON.stringify([...deliveryScope, itemIndex]))
