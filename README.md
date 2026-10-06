@@ -95,6 +95,36 @@ The account API can return an incomplete workflow list. If a workflow is absent,
 An empty webhook list means the workflow needs an enabled generic webhook before this node can start it.
 Selecting a workflow does not publish it, activate triggers, or run its latest saved draft.
 
+## Get a run and its result
+
+1. Set **Connection** to **Whenever Account**.
+2. Select **Get Run**.
+3. Set **Run ID** to the receipt's `runId`, for example `{{ $json.runId }}`.
+4. Execute the node to read one snapshot.
+
+The result includes `runId`, `workflowId`, `version`, `status`, `startedAt`, `nextSeq`,
+`hasMoreEvents`, and `outputState`. It also includes `endedAt`, `failure`, and
+`observationComplete` when Whenever reports them.
+
+`status` is `running`, `succeeded`, `failed`, `timed_out`, or `cancelled`.
+A failed run is returned as evidence, not treated as a failed API request.
+If `observationComplete` is false, keep reading before treating the recorded status as final.
+An absent `observationComplete` field is preserved as absent, as in the webhook-run API.
+
+| Output state | Meaning |
+| --- | --- |
+| `available` | The page contains successful output, parsed into `output`. JSON null, false, zero, strings, and arrays are preserved. |
+| `omitted` | Whenever omitted output. `outputOmitted` gives `too_large` or `unserializable`. |
+| `none` | The page contains a successful completion event with no return value. |
+| `not_observed` | This page does not contain successful completion evidence. It does not establish empty output. |
+
+Whenever stores at most 20,000 characters of serialized run output in its completion event.
+This operation cannot recover omitted output.
+
+Get Run reads at most **Event Limit** events, default 100. When `hasMoreEvents` is true,
+set **After Sequence** to `nextSeq` and read the next page. Even a successful run can have
+its completion event on a later page. This operation neither waits nor starts a new run.
+
 ## Errors
 
 Whenever returns HTTP 202 for a new accepted delivery and HTTP 200 for a deduplicated delivery.
@@ -203,5 +233,6 @@ and [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
 
 ## Scope
 
-Version 0.1.0 starts runs through generic webhooks. It does not wait for completion or retrieve workflow results.
+The node starts runs through generic webhooks and retrieves stored run evidence through the account API.
+Get Run reads one snapshot. It does not wait for completion.
 The package has no runtime dependencies beyond the `n8n-workflow` peer supplied by n8n.
