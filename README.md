@@ -94,6 +94,10 @@ Saved retries require execution data recorded by this version of the node.
 
 Use the Node.js version in `.nvmrc`.
 
+The project `.npmrc` sets `min-release-age=14`, which npm measures in days.
+This applies to local development and both GitHub workflows when npm selects dependency versions.
+Existing lockfile entries remain pinned; this setting does not independently audit their publication dates.
+
 ```sh
 npm ci --ignore-scripts
 npm test
