@@ -44,8 +44,15 @@ The node requires a nonempty `runId` in either response.
 A rejection, missing `runId`, or invalid response produces an n8n error.
 An inactive workflow can return HTTP 200 without a `runId`, which also produces an error.
 
-A transport error leaves acceptance uncertain. Check Whenever before retrying, because a run might already have started.
-Enabling n8n's **Retry On Fail** can send the request again and start another run.
+A new execution sends a new `Idempotency-Key`, so identical JSON can intentionally start separate runs.
+Each node, loop iteration, and incoming item has a separate key.
+The node retains the original execution identity in n8n's execution context.
+**Retry On Fail** and retries from saved failed executions reuse the original keys, including when n8n assigns a new execution ID.
+Whenever can then return the existing `runId` instead of starting the same delivery again.
+
+A transport error leaves acceptance uncertain. Retrying that execution reuses its key; clicking **Execute workflow** starts a new execution with new keys.
+Saved retries require execution data recorded by this version of the node. Older executions did not send these keys.
+Duplicate protection depends on Whenever retaining the delivery record. A retry does not change an already accepted run's input.
 With **Continue On Fail**, failed items contain `error` instead of `runId`.
 
 ## Development

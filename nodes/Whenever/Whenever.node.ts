@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
 	IExecuteFunctions,
 	INodeExecutionData,
@@ -70,6 +71,16 @@ export class Whenever implements INodeType {
 			);
 		}
 
+		const nodeContext = this.getContext('node');
+		// n8n preserves this context when a saved execution is retried under a new execution ID.
+		nodeContext.wheneverExecutionId ??= this.getExecutionId();
+		const deliveryScope = [
+			this.getInstanceId(),
+			this.getWorkflow().id,
+			nodeContext.wheneverExecutionId,
+			this.getNode().id,
+			this.getWorkflowDataProxy(0).$runIndex,
+		];
 		const results: INodeExecutionData[] = [];
 		for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
 			try {
@@ -95,7 +106,13 @@ export class Whenever implements INodeType {
 						{
 							method: 'POST',
 							url: webhookUrl,
-							headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+							headers: {
+								'Content-Type': 'application/json',
+								Accept: 'application/json',
+								'Idempotency-Key': createHash('sha256')
+									.update(JSON.stringify([...deliveryScope, itemIndex]))
+									.digest('hex'),
+							},
 							body,
 							json: false,
 							encoding: 'text',

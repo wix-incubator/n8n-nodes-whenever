@@ -13,6 +13,10 @@ before(async () => {
 		let body = '';
 		for await (const chunk of request) body += chunk;
 		requests.push({ method: request.method, path: request.url, headers: request.headers, body });
+		if (response.disconnect || response.disconnectAt === requests.length) {
+			reply.destroy();
+			return;
+		}
 		reply.writeHead(response.status, { 'content-type': 'application/json', ...response.headers });
 		reply.end(typeof response.body === 'string' ? response.body : JSON.stringify(response.body));
 	});
@@ -26,7 +30,13 @@ beforeEach(() => {
 });
 
 function context(inputs = ['{"message":"Hello","nested":{"count":2}}'], overrides = {}) {
+	const nodeContext = {};
 	return {
+		getContext: () => nodeContext,
+		getExecutionId: () => 'execution-1',
+		getInstanceId: () => 'instance-1',
+		getWorkflow: () => ({ id: 'workflow-1' }),
+		getWorkflowDataProxy: () => ({ $runIndex: 0 }),
 		getInputData: () => inputs.map(() => ({ json: {} })),
 		getNodeParameter: (name, index) => {
 			if (name === 'input') return inputs[index];
@@ -35,6 +45,7 @@ function context(inputs = ['{"message":"Hello","nested":{"count":2}}'], override
 		},
 		getCredentials: async () => ({ webhookUrl }),
 		getNode: () => ({
+			id: 'whenever-1',
 			name: 'Whenever',
 			type: 'n8n-nodes-whenever.whenever',
 			typeVersion: 1,
@@ -62,6 +73,81 @@ function context(inputs = ['{"message":"Hello","nested":{"count":2}}'], override
 }
 
 const execute = (inputs, overrides) => new Whenever().execute.call(context(inputs, overrides));
+
+test('uses different idempotency keys for new executions with identical JSON', async () => {
+	await execute(undefined, { getExecutionId: () => 'execution-1' });
+	await execute(undefined, { getExecutionId: () => 'execution-2' });
+	const keys = requests.map((request) => request.headers['idempotency-key']);
+	assert.equal(requests[0].body, requests[1].body);
+	for (const key of keys) assert.equal(typeof key, 'string');
+	assert.notEqual(keys[0], keys[1]);
+});
+
+test('reuses the delivery key when n8n retries a saved failed execution under a new ID', async () => {
+	let nodeContext = {};
+	response = { status: 500, body: {} };
+	await assert.rejects(
+		execute(undefined, {
+			getContext: () => nodeContext,
+			getExecutionId: () => 'original-execution',
+		}),
+		/HTTP 500/,
+	);
+	nodeContext = JSON.parse(JSON.stringify(nodeContext));
+	response = { status: 200, body: { runId: 'original-run' } };
+	const result = await execute(undefined, {
+		getContext: () => nodeContext,
+		getExecutionId: () => 'retry-execution',
+	});
+	assert.equal(requests[1].headers['idempotency-key'], requests[0].headers['idempotency-key']);
+	assert.equal(result[0][0].json.runId, 'original-run');
+});
+
+test('reuses the delivery key after a lost response during Retry On Fail', async () => {
+	const executionContext = context();
+	response = { disconnect: true };
+	await assert.rejects(new Whenever().execute.call(executionContext), /could not confirm/);
+	response = { status: 200, body: { runId: 'accepted-before-disconnect' } };
+	const result = await new Whenever().execute.call(executionContext);
+	assert.equal(requests.length, 2);
+	assert.equal(requests[1].headers['idempotency-key'], requests[0].headers['idempotency-key']);
+	assert.equal(result[0][0].json.runId, 'accepted-before-disconnect');
+});
+
+test('reuses distinct item keys when a partially delivered batch is retried', async () => {
+	const executionContext = context(['{"message":"same"}', '{"message":"same"}']);
+	response.disconnectAt = 2;
+	await assert.rejects(new Whenever().execute.call(executionContext), /could not confirm/);
+	response = { status: 200, body: { runId: 'original-run' } };
+	await new Whenever().execute.call(executionContext);
+	const keys = requests.map((request) => request.headers['idempotency-key']);
+	assert.notEqual(keys[0], keys[1]);
+	assert.deepEqual(keys.slice(2), keys.slice(0, 2));
+});
+
+test('uses distinct keys for separate loop iterations in one execution', async () => {
+	const nodeContext = {};
+	for (const runIndex of [0, 1]) {
+		await execute(undefined, {
+			getContext: () => nodeContext,
+			getWorkflowDataProxy: () => ({ $runIndex: runIndex }),
+		});
+	}
+	assert.notEqual(requests[0].headers['idempotency-key'], requests[1].headers['idempotency-key']);
+});
+
+test('uses distinct keys for two Whenever nodes calling the same endpoint', async () => {
+	for (const nodeId of ['first-node', 'second-node']) {
+		await execute(undefined, { getNode: () => ({ ...context().getNode(), id: nodeId }) });
+	}
+	assert.notEqual(requests[0].headers['idempotency-key'], requests[1].headers['idempotency-key']);
+});
+
+test('isolates keys when separate n8n instances have the same execution IDs', async () => {
+	await execute(undefined, { getInstanceId: () => 'first-instance' });
+	await execute(undefined, { getInstanceId: () => 'second-instance' });
+	assert.notEqual(requests[0].headers['idempotency-key'], requests[1].headers['idempotency-key']);
+});
 
 test('sends the JSON input to the configured webhook as a POST', async () => {
 	await execute();
