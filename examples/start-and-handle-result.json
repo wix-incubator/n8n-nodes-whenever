@@ -1,0 +1,434 @@
+{
+  "name": "Whenever \u2014 start a workflow and handle its result",
+  "nodes": [
+    {
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "start-workflow",
+      "name": "Start workflow",
+      "type": "n8n-nodes-whenever.whenever",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "authentication": "account",
+        "operation": "start",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SELECT_YOUR_WORKFLOW"
+        },
+        "webhookId": "SELECT_YOUR_WEBHOOK",
+        "inputFormat": "json",
+        "input": "{\"source\":\"n8n\",\"message\":\"Hello from n8n\"}"
+      }
+    },
+    {
+      "id": "prepare-observation",
+      "name": "Prepare observation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { runId: $json.runId, afterSeq: 0, reads: 0, deadline: Date.now() + 5 * 60 * 1000, outputState: 'not_observed' } };"
+      }
+    },
+    {
+      "id": "observation-state",
+      "name": "Observation state",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "get-run",
+      "name": "Get run",
+      "type": "n8n-nodes-whenever.whenever",
+      "typeVersion": 1,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "authentication": "account",
+        "operation": "getRun",
+        "runId": "={{ $json.runId }}",
+        "afterSeq": "={{ $json.afterSeq }}",
+        "eventLimit": 100
+      }
+    },
+    {
+      "id": "evaluate-result",
+      "name": "Evaluate result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const previous = $('Observation state').item.json;\nconst result = {\n  ...previous,\n  ...$json,\n  afterSeq: $json.nextSeq,\n  reads: previous.reads + 1,\n  outputState: $json.outputState === 'not_observed' ? previous.outputState : $json.outputState,\n};\nconst terminal = ['succeeded', 'failed', 'timed_out', 'cancelled'].includes(result.status)\n  && result.observationComplete !== false;\nif (terminal && !result.hasMoreEvents) {\n  result.route = result.status !== 'succeeded' ? 'failed'\n    : result.outputState === 'available' ? 'success' : 'missing';\n} else if (Date.now() >= result.deadline || result.reads >= 120) {\n  result.route = 'timeout';\n} else {\n  result.route = 'wait';\n}\nreturn { json: result };"
+      }
+    },
+    {
+      "id": "route-result",
+      "name": "Route result",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-wait",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "wait",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "wait"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-success",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "success",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "success"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-missing",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "missing",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "missing"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-failed",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-timeout",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "timeout",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "timeout"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wait-before-reading",
+      "name": "Wait before reading",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        -260
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "use-output",
+      "name": "Use output",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        -120
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "handle-missing-output",
+      "name": "Handle missing output",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        40
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "report-run-failure",
+      "name": "Report run failure",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        200
+      ],
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "={{ \"Whenever run \" + $json.runId + \" ended with \" + $json.status + ($json.failure?.message ? \": \" + $json.failure.message : \"\") }}"
+      }
+    },
+    {
+      "id": "report-observation-timeout",
+      "name": "Report observation timeout",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        360
+      ],
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "={{ \"Stopped observing Whenever run \" + $json.runId + \". Last observed status: \" + $json.status + \". Check this run before starting another.\" }}"
+      }
+    },
+    {
+      "id": "setup",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -400
+      ],
+      "parameters": {
+        "content": "## Before running\nSelect your Whenever account credential on Start workflow and Get run. Choose a workflow and enabled generic webhook. Set the expected input.\n\nRunning this example starts a real workflow with its external effects. Account authorization expires after one hour.\n\nObservation stops after five minutes or 120 reads. The timeout does not cancel the Whenever run. Use output exposes $json.output. Handle missing output retains the omission reason or lack of observed output.",
+        "height": 360,
+        "width": 540
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Start workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start workflow": {
+      "main": [
+        [
+          {
+            "node": "Prepare observation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare observation": {
+      "main": [
+        [
+          {
+            "node": "Observation state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Observation state": {
+      "main": [
+        [
+          {
+            "node": "Get run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get run": {
+      "main": [
+        [
+          {
+            "node": "Evaluate result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate result": {
+      "main": [
+        [
+          {
+            "node": "Route result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route result": {
+      "main": [
+        [
+          {
+            "node": "Wait before reading",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle missing output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report run failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report observation timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before reading": {
+      "main": [
+        [
+          {
+            "node": "Observation state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}
