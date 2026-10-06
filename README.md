@@ -78,6 +78,23 @@ This node does not upload binary files or send multipart forms.
 The node sends one request per incoming item. It returns one receipt per accepted request.
 The next node can access the receipt with `{{ $json.runId }}`.
 
+## Select a workflow from your account
+
+1. Set **Connection** to **Whenever Account** and select a connected credential.
+2. Select **Start Workflow**.
+3. Choose a **Workflow** from the searchable list, or select **By ID**.
+4. Choose a **Webhook Name or ID** from that workflow's enabled generic webhooks.
+5. Set the input format and payload, then execute the node.
+
+Execution resolves the selected webhook within the selected workflow each time.
+A disabled, removed, or provider-specific webhook produces an error before delivery.
+The request uses the deployed workflow's webhook and retains the existing duplicate protection.
+The account token is used only for discovery. It is never sent to the webhook URL.
+
+The account API can return an incomplete workflow list. If a workflow is absent, use **By ID**.
+An empty webhook list means the workflow needs an enabled generic webhook before this node can start it.
+Selecting a workflow does not publish it, activate triggers, or run its latest saved draft.
+
 ## Errors
 
 Whenever returns HTTP 202 for a new accepted delivery and HTTP 200 for a deduplicated delivery.
