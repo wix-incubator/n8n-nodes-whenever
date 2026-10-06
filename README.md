@@ -10,7 +10,7 @@ The **Start Workflow** operation sends JSON, form values, or text and returns th
 
 An accepted request means Whenever accepted the run for processing. It does not establish that the workflow finished successfully.
 
-Requires n8n 1.86 or later.
+Webhook URL connections require n8n 1.86 or later. Account connections require n8n 2.41.0 or later.
 
 ## Credentials
 
@@ -22,6 +22,26 @@ Requires n8n 1.86 or later.
 
 The URL grants permission to start runs. The credential stores it as a password field.
 There is no automatic credential test because calling this endpoint can start a workflow.
+
+## Account connection
+
+1. Set **Connection** to **Whenever Account**.
+2. Create a **Whenever OAuth2 API** credential.
+3. Select **Connect my account** and approve access in Whenever.
+4. Select **Get Account** and execute the node to check access without starting a workflow.
+
+n8n discovers the public Whenever OAuth server, registers the client, and uses PKCE.
+The credential stores authorization in n8n. Account requests go only to `https://mcp.whenever.dev/`.
+No session cookies or access tokens need to be copied into node parameters.
+
+Whenever currently issues one-hour account tokens without refresh tokens.
+Reconnect the credential when authorization expires. Account operations are therefore unsuitable
+for unattended schedules that must continue beyond that hour. Existing webhook URL connections
+retain their independent authorization and can still start runs after account authorization expires.
+
+Get Account returns `isLoggedIn`, `email`, `displayName`, and `photoUrl`.
+A signed-in user can have null profile fields when the profile is unavailable.
+A successful account read does not establish workflow setup, activation, or a successful run.
 
 ## Use
 
