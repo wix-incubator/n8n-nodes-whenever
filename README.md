@@ -32,7 +32,7 @@ The node returns a `runId` for each accepted request:
 ```
 
 Use `{{ $json.runId }}` in subsequent nodes.
-The node starts the workflow but does not wait for completion or return its results.
+The node starts the workflow but does not wait for completion. Use **Get Run** to read its result.
 
 ## Account connection
 
@@ -58,6 +58,23 @@ Webhook URL connections are not affected.
 The node looks up the webhook on every run, so a disabled or removed webhook fails before anything is sent.
 Your account token is never sent to the webhook.
 If a workflow is missing from the list, enter it **By ID**.
+
+## Get a run
+
+1. Set **Connection** to **Whenever Account**.
+2. Select **Get Run** and set **Run ID** to `{{ $json.runId }}`.
+3. Execute the node.
+
+The node returns the run's `status`: `running`, `succeeded`, `failed`, `timed_out`, or `cancelled`.
+`outputState` says what happened to its result:
+
+- `available`: the result is in `output`.
+- `omitted`: Whenever did not store it, because it was too large or could not be saved.
+- `none`: the run finished without returning anything.
+- `not_observed`: the result is not on this page yet.
+
+Get Run reads one page of up to **Event Limit** events and does not wait.
+When `hasMoreEvents` is true, set **After Sequence** to `nextSeq` and read again.
 
 ## License
 
