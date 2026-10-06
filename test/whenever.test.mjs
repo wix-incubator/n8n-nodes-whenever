@@ -32,7 +32,7 @@ beforeEach(() => {
 function context(
 	inputs = ['{"message":"Hello","nested":{"count":2}}'],
 	overrides = {},
-	inputFormat,
+	inputFormat = 'json',
 ) {
 	const nodeContext = {};
 	return {
@@ -42,9 +42,9 @@ function context(
 		getWorkflow: () => ({ id: 'workflow-1' }),
 		getWorkflowDataProxy: () => ({ $runIndex: 0 }),
 		getInputData: () => inputs.map(() => ({ json: {} })),
-		getNodeParameter: (name, index, fallbackValue) => {
+		getNodeParameter: (name, index) => {
 			if (name === 'input' || name === 'textInput' || name === 'formFields') return inputs[index];
-			if (name === 'inputFormat') return inputFormat ?? fallbackValue;
+			if (name === 'inputFormat') return inputFormat;
 			if (name === 'operation') return 'start';
 			throw new Error(`Unexpected parameter: ${name}`);
 		},
@@ -94,6 +94,16 @@ for (const [format, input] of [
 	});
 }
 
+test('sends a numeric text expression as its decimal text', async () => {
+	await execute([42], {}, 'text');
+	assert.equal(requests[0].body, '42');
+});
+
+test('rejects an object text expression before making a request', async () => {
+	await assert.rejects(execute([{ amount: 25 }], {}, 'text'), /Text Input must be text/);
+	assert.equal(requests.length, 0);
+});
+
 test('encodes form names and values without losing special characters or empty values', async () => {
 	const result = await execute(
 		[
@@ -102,7 +112,7 @@ test('encodes form names and values without losing special characters or empty v
 					{ name: 'customer & tier', value: 'Sam + Živilė' },
 					{ name: 'message', value: 'a=b&c' },
 					{ name: 'empty', value: '' },
-					{ name: 'amount', value: '25' },
+					{ name: 'amount', value: 25 },
 				],
 			},
 		],
@@ -115,6 +125,14 @@ test('encodes form names and values without losing special characters or empty v
 		'customer+%26+tier=Sam+%2B+%C5%BDivil%C4%97&message=a%3Db%26c&empty=&amount=25',
 	);
 	assert.equal(result[0][0].json.runId, 'run-123');
+});
+
+test('rejects an object form value before making a request', async () => {
+	await assert.rejects(
+		execute([{ values: [{ name: 'order', value: { amount: 25 } }] }], {}, 'form'),
+		/Form field value must be text/,
+	);
+	assert.equal(requests.length, 0);
 });
 
 test('sends the form values for each incoming item separately', async () => {
@@ -227,10 +245,25 @@ test('returns the existing runId for a deduplicated delivery', async () => {
 	assert.equal((await execute())[0][0].json.runId, 'run-123');
 });
 
-for (const status of [400, 401, 403, 404, 429, 500, 503]) {
-	test(`shows an error when Whenever rejects the request with HTTP ${status}`, async () => {
+for (const status of [400, 401, 403, 404]) {
+	test(`tells the user to check the webhook and input on HTTP ${status}`, async () => {
 		response = { status, body: { runId: 'not-accepted' } };
-		await assert.rejects(execute(), new RegExp(`HTTP ${status}`));
+		await assert.rejects(execute(), (error) => {
+			assert.match(error.message, new RegExp(`rejected the request \\(HTTP ${status}\\)`));
+			assert.match(error.description, /Check the webhook URL and input/);
+			return true;
+		});
+	});
+}
+
+for (const status of [429, 500, 503]) {
+	test(`tells the user to retry on HTTP ${status}`, async () => {
+		response = { status, body: { runId: 'not-accepted' } };
+		await assert.rejects(execute(), (error) => {
+			assert.match(error.message, new RegExp(`could not process the request \\(HTTP ${status}\\)`));
+			assert.match(error.description, /Retry later/);
+			return true;
+		});
 	});
 }
 
@@ -243,6 +276,11 @@ for (const body of [{}, { runId: '' }, { runId: '  ' }, { runId: 42 }, null, 'no
 
 test('rejects malformed input before making a request', async () => {
 	await assert.rejects(execute(['{invalid']), /valid JSON/);
+	assert.equal(requests.length, 0);
+});
+
+test('rejects an undefined JSON expression before making a request', async () => {
+	await assert.rejects(execute([undefined]), /valid JSON/);
 	assert.equal(requests.length, 0);
 });
 
@@ -274,7 +312,43 @@ test('sends each incoming item and links each receipt to that item', async () =>
 	);
 });
 
-test('hides the webhook URL when the transport fails', async () => {
+test('reports the transport error code without the webhook URL', async () => {
+	await assert.rejects(
+		execute(undefined, {
+			helpers: {
+				httpRequestWithAuthentication: async () => {
+					throw Object.assign(new Error(`connect ECONNREFUSED ${webhookUrl}`), {
+						code: 'ECONNREFUSED',
+					});
+				},
+			},
+		}),
+		(error) => {
+			assert.match(error.message, /could not confirm/i);
+			assert.match(error.description, /\(ECONNREFUSED\)$/);
+			assert.equal(JSON.stringify(error).includes('test-secret'), false);
+			return true;
+		},
+	);
+});
+
+test('reports a transport error code wrapped in a cause', async () => {
+	await assert.rejects(
+		execute(undefined, {
+			helpers: {
+				httpRequestWithAuthentication: async () => {
+					throw new Error('request failed', { cause: { code: 'ETIMEDOUT' } });
+				},
+			},
+		}),
+		(error) => {
+			assert.match(error.description, /\(ETIMEDOUT\)$/);
+			return true;
+		},
+	);
+});
+
+test('hides a transport failure that carries no error code', async () => {
 	await assert.rejects(
 		execute(undefined, {
 			helpers: {
@@ -285,9 +359,21 @@ test('hides the webhook URL when the transport fails', async () => {
 		}),
 		(error) => {
 			assert.match(error.message, /could not confirm/i);
+			assert.equal(error.description, 'Check Whenever before retrying. A run may have started.');
 			assert.equal(JSON.stringify(error).includes('test-secret'), false);
 			return true;
 		},
+	);
+});
+
+test('keeps the message of an unexpected error', async () => {
+	await assert.rejects(
+		execute(undefined, {
+			getNodeParameter: () => {
+				throw new Error('parameter store exploded');
+			},
+		}),
+		/parameter store exploded/,
 	);
 });
 
@@ -314,6 +400,7 @@ for (const webhookUrl of [
 	'not a URL',
 	'file:///tmp/workflow',
 	'https://user:password@example.com/hooks',
+	'https://example.com/hooks#fragment',
 ]) {
 	test(`rejects an invalid webhook URL without sending a request: ${webhookUrl}`, async () => {
 		await assert.rejects(

@@ -1,11 +1,11 @@
 {
-  "node": "n8n-nodes-whenever.whenever",
-  "nodeVersion": "1.0",
-  "codexVersion": "1.0",
-  "categories": ["Development"],
-  "resources": {
-    "primaryDocumentation": [
-      { "url": "https://github.com/wix-incubator/n8n-nodes-whenever#readme" }
-    ]
-  }
+	"node": "n8n-nodes-whenever.whenever",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Development"],
+	"resources": {
+		"primaryDocumentation": [
+			{ "url": "https://github.com/wix-incubator/n8n-nodes-whenever#readme" }
+		]
+	}
 }

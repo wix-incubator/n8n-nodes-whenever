@@ -10,6 +10,8 @@ The **Start Workflow** operation sends JSON, form values, or text and returns th
 
 An accepted request means Whenever accepted the run for processing. It does not establish that the workflow finished successfully.
 
+Requires n8n 1.86 or later.
+
 ## Credentials
 
 1. Add a generic webhook trigger to your Whenever workflow.
@@ -30,8 +32,7 @@ There is no automatic credential test because calling this endpoint can start a 
 5. Enter the input expected by your Whenever workflow.
 6. Execute the node.
 
-**JSON** is the default, including for existing nodes that have no saved format selection.
-Enter JSON in **JSON Input**, for example:
+**JSON** is the default. Enter JSON in **JSON Input**, for example:
 
 ```json
 { "source": "n8n", "message": "Hello from n8n" }
@@ -48,27 +49,46 @@ For **Text**, enter text in **Text Input** or use an expression such as `{{ $jso
 The node sends the text unchanged as `text/plain`.
 Plain text, CSV, and XML arrive as one string. The workflow must interpret the format itself.
 
+An expression that supplies a number or boolean to a text or form field is sent as its text.
+An expression that supplies an object, array, or nothing produces an error before any request is sent.
+
 Whenever's generic webhooks have a default request limit of 64 KiB.
 This node does not upload binary files or send multipart forms.
 
 The node sends one request per incoming item. It returns one receipt per accepted request.
 The next node can access the receipt with `{{ $json.runId }}`.
 
+## Errors
+
 Whenever returns HTTP 202 for a new accepted delivery and HTTP 200 for a deduplicated delivery.
 The node requires a nonempty `runId` in either response.
-A rejection, missing `runId`, or invalid response produces an n8n error.
-An inactive workflow can return HTTP 200 without a `runId`, which also produces an error.
+An inactive workflow returns HTTP 200 without a `runId`, which produces an error.
 
-A new execution sends a new `Idempotency-Key`, so identical input can intentionally start separate runs.
+| Outcome                     | Error                                  | What to do                                                                                                                             |
+| --------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP 4xx other than 429     | Whenever rejected the request          | Check the webhook URL and input in Whenever.                                                                                           |
+| HTTP 429 or 5xx             | Whenever could not process the request | Retry later. The retry reuses the delivery key.                                                                                        |
+| No response                 | Whenever could not confirm acceptance  | Check Whenever before retrying. A run may have started. The error names the transport code, such as `ECONNREFUSED`, and never the URL. |
+| 2xx without a valid `runId` | Whenever did not return a valid runId  | Check that the workflow is active.                                                                                                     |
+
+With **Continue On Fail**, failed items contain `error` instead of `runId`.
+
+## Duplicate protection
+
+Every request carries an `Idempotency-Key`. Whenever keeps a delivery record under that key for 24 hours.
+A repeated key inside that window returns the existing `runId` instead of starting another run.
+
+The key is derived from the n8n instance, workflow, execution, node, loop iteration, and item.
+A new execution sends new keys, so identical input can intentionally start separate runs.
 Each node, loop iteration, and incoming item has a separate key.
+
 The node retains the original execution identity in n8n's execution context.
 **Retry On Fail** and retries from saved failed executions reuse the original keys, including when n8n assigns a new execution ID.
-Whenever can then return the existing `runId` instead of starting the same delivery again.
+Clicking **Execute workflow** starts a new execution with new keys.
 
-A transport error leaves acceptance uncertain. Retrying that execution reuses its key; clicking **Execute workflow** starts a new execution with new keys.
-Saved retries require execution data recorded by this version of the node. Older executions did not send these keys.
-Duplicate protection depends on Whenever retaining the delivery record. A retry does not change an already accepted run's input.
-With **Continue On Fail**, failed items contain `error` instead of `runId`.
+The key does not cover the input. If you edit the input and then retry a saved failed execution within 24 hours,
+Whenever returns the run it already started with the original input.
+Saved retries require execution data recorded by this version of the node.
 
 ## Development
 
@@ -81,8 +101,10 @@ npm run lint
 npm run dev
 ```
 
-`--ignore-scripts` skips an upstream lint package's install script that requires pnpm.
-The build and test scripts run explicitly in the commands above.
+`--ignore-scripts` is required. Two development dependencies have install scripts that fail here:
+`eslint-plugin-n8n-nodes-base` refuses any package manager other than pnpm,
+and `isolated-vm` compiles a native module that does not build on the Node.js version in `.nvmrc`.
+Neither is needed to build, test, or lint this package.
 
 `npm run dev` uses the official n8n development tool to load this node into a local n8n instance.
 Follow its startup output for the browser address and any local runtime requirements.
@@ -95,5 +117,3 @@ These tests establish request and response behavior, but do not establish an act
 
 Version 0.1.0 starts runs through generic webhooks. It does not wait for completion or retrieve workflow results.
 The package has no runtime dependencies beyond the `n8n-workflow` peer supplied by n8n.
-
-The repository is private. npm publication and n8n community verification are separate release steps.

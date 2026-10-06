@@ -7,42 +7,159 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-function workflowRequestBody(
+type WebhookRequest = { body: string; contentType: string };
+type WebhookResponse = { statusCode: number; body: unknown };
+
+function isWebhookUrl(value: string): boolean {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return false;
+	}
+	return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.hash;
+}
+
+function textValue(
 	context: IExecuteFunctions,
 	itemIndex: number,
-): { body: string; contentType: string } {
-	const inputFormat = context.getNodeParameter('inputFormat', itemIndex, 'json');
-	switch (inputFormat) {
-		case 'json': {
-			const input = context.getNodeParameter('input', itemIndex) as unknown;
-			try {
-				const value: unknown = typeof input === 'string' ? JSON.parse(input) : input;
-				const body = JSON.stringify(value);
-				if (body === undefined)
-					throw new NodeOperationError(context.getNode(), 'Missing JSON input', { itemIndex });
-				return { body, contentType: 'application/json' };
-			} catch {
-				throw new NodeOperationError(context.getNode(), 'JSON Input must contain valid JSON.', {
-					itemIndex,
-				});
-			}
+	value: unknown,
+	label: string,
+): string {
+	if (typeof value === 'string') return value;
+	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+	throw new NodeOperationError(context.getNode(), `${label} must be text.`, { itemIndex });
+}
+
+function jsonRequest(context: IExecuteFunctions, itemIndex: number): WebhookRequest {
+	const input = context.getNodeParameter('input', itemIndex) as unknown;
+	let value: unknown = input;
+	if (typeof input === 'string') {
+		try {
+			value = JSON.parse(input);
+		} catch {
+			value = undefined;
 		}
-		case 'form': {
-			const fields = context.getNodeParameter('formFields', itemIndex, {}) as {
-				values?: Array<{ name: string; value: string }>;
-			};
-			const form = new URLSearchParams();
-			for (const field of fields.values ?? []) form.append(field.name, field.value);
-			return { body: form.toString(), contentType: 'application/x-www-form-urlencoded' };
-		}
+	}
+	const body = JSON.stringify(value) as string | undefined;
+	if (body === undefined) {
+		throw new NodeOperationError(context.getNode(), 'JSON Input must contain valid JSON.', {
+			itemIndex,
+		});
+	}
+	return { body, contentType: 'application/json' };
+}
+
+function formRequest(context: IExecuteFunctions, itemIndex: number): WebhookRequest {
+	const fields = context.getNodeParameter('formFields', itemIndex, {}) as {
+		values?: Array<{ name: unknown; value: unknown }>;
+	};
+	const form = new URLSearchParams();
+	for (const field of fields.values ?? []) {
+		form.append(
+			textValue(context, itemIndex, field.name, 'Form field name'),
+			textValue(context, itemIndex, field.value, 'Form field value'),
+		);
+	}
+	return { body: form.toString(), contentType: 'application/x-www-form-urlencoded' };
+}
+
+function textRequest(context: IExecuteFunctions, itemIndex: number): WebhookRequest {
+	const text = context.getNodeParameter('textInput', itemIndex) as unknown;
+	return { body: textValue(context, itemIndex, text, 'Text Input'), contentType: 'text/plain' };
+}
+
+function webhookRequest(context: IExecuteFunctions, itemIndex: number): WebhookRequest {
+	switch (context.getNodeParameter('inputFormat', itemIndex)) {
+		case 'json':
+			return jsonRequest(context, itemIndex);
+		case 'form':
+			return formRequest(context, itemIndex);
 		case 'text':
-			return {
-				body: context.getNodeParameter('textInput', itemIndex) as string,
-				contentType: 'text/plain',
-			};
+			return textRequest(context, itemIndex);
 		default:
 			throw new NodeOperationError(context.getNode(), 'Unsupported input format.', { itemIndex });
 	}
+}
+
+function transportErrorCode(error: unknown): string | undefined {
+	const cause = (error as { cause?: unknown } | null)?.cause;
+	for (const candidate of [error, cause]) {
+		const code = (candidate as { code?: unknown } | null)?.code;
+		if (typeof code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(code)) return code;
+	}
+	return undefined;
+}
+
+async function deliver(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	webhookUrl: string,
+	request: WebhookRequest,
+	idempotencyKey: string,
+): Promise<WebhookResponse> {
+	try {
+		return (await context.helpers.httpRequestWithAuthentication.call(
+			context,
+			'wheneverWebhookApi',
+			{
+				method: 'POST',
+				url: webhookUrl,
+				headers: {
+					'Content-Type': request.contentType,
+					Accept: 'application/json',
+					'Idempotency-Key': idempotencyKey,
+				},
+				body: request.body,
+				json: false,
+				encoding: 'text',
+				returnFullResponse: true,
+				ignoreHttpStatusErrors: true,
+				disableFollowRedirect: true,
+				timeout: 30000,
+			},
+		)) as WebhookResponse;
+	} catch (error) {
+		const code = transportErrorCode(error);
+		throw new NodeOperationError(context.getNode(), 'Whenever could not confirm acceptance.', {
+			itemIndex,
+			description: `Check Whenever before retrying. A run may have started.${code === undefined ? '' : ` (${code})`}`,
+		});
+	}
+}
+
+function rejection(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	statusCode: number,
+): NodeApiError {
+	const retryable = statusCode === 429 || statusCode >= 500;
+	return new NodeApiError(
+		context.getNode(),
+		{},
+		{
+			itemIndex,
+			httpCode: String(statusCode),
+			message: retryable
+				? `Whenever could not process the request (HTTP ${statusCode}).`
+				: `Whenever rejected the request (HTTP ${statusCode}).`,
+			description: retryable
+				? 'Retry later. A run start was not confirmed, and a retry reuses the same delivery key.'
+				: 'Check the webhook URL and input in Whenever. A run start was not confirmed.',
+		},
+	);
+}
+
+function acceptedRunId(body: unknown): string | undefined {
+	let receipt: unknown;
+	try {
+		receipt = typeof body === 'string' ? JSON.parse(body) : body;
+	} catch {
+		return undefined;
+	}
+	if (receipt === null || typeof receipt !== 'object' || !('runId' in receipt)) return undefined;
+	const { runId } = receipt;
+	return typeof runId === 'string' && runId.trim().length > 0 ? runId : undefined;
 }
 
 export class Whenever implements INodeType {
@@ -166,12 +283,7 @@ export class Whenever implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const credentials = await this.getCredentials('wheneverWebhookApi');
 		const webhookUrl = String(credentials.webhookUrl ?? '').trim();
-		try {
-			const url = new URL(webhookUrl);
-			if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash) {
-				throw new NodeOperationError(this.getNode(), 'Invalid webhook URL');
-			}
-		} catch {
+		if (!isWebhookUrl(webhookUrl)) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
@@ -179,7 +291,6 @@ export class Whenever implements INodeType {
 		}
 
 		const nodeContext = this.getContext('node');
-		// n8n preserves this context when a saved execution is retried under a new execution ID.
 		nodeContext.wheneverExecutionId ??= this.getExecutionId();
 		const deliveryScope = [
 			this.getInstanceId(),
@@ -188,83 +299,39 @@ export class Whenever implements INodeType {
 			this.getNode().id,
 			this.getWorkflowDataProxy(0).$runIndex,
 		];
+		const deliveryKey = (itemIndex: number): string =>
+			createHash('sha256')
+				.update(JSON.stringify([...deliveryScope, itemIndex]))
+				.digest('hex');
+
 		const results: INodeExecutionData[] = [];
 		for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
 			try {
-				const { body, contentType } = workflowRequestBody(this, itemIndex);
-
-				let response: { statusCode: number; body: unknown };
-				try {
-					response = await this.helpers.httpRequestWithAuthentication.call(
-						this,
-						'wheneverWebhookApi',
-						{
-							method: 'POST',
-							url: webhookUrl,
-							headers: {
-								'Content-Type': contentType,
-								Accept: 'application/json',
-								'Idempotency-Key': createHash('sha256')
-									.update(JSON.stringify([...deliveryScope, itemIndex]))
-									.digest('hex'),
-							},
-							body,
-							json: false,
-							encoding: 'text',
-							returnFullResponse: true,
-							ignoreHttpStatusErrors: true,
-							disableFollowRedirect: true,
-							timeout: 30000,
-						},
-					);
-				} catch {
-					throw new NodeOperationError(this.getNode(), 'Whenever could not confirm acceptance.', {
-						itemIndex,
-						description: 'Check Whenever before retrying. A run may have started.',
-					});
-				}
-
+				const request = webhookRequest(this, itemIndex);
+				const response = await deliver(
+					this,
+					itemIndex,
+					webhookUrl,
+					request,
+					deliveryKey(itemIndex),
+				);
 				if (response.statusCode < 200 || response.statusCode >= 300) {
-					throw new NodeApiError(
-						this.getNode(),
-						{},
-						{
-							itemIndex,
-							httpCode: String(response.statusCode),
-							message: `Whenever rejected the request (HTTP ${response.statusCode}).`,
-							description:
-								'Check the webhook URL and input in Whenever. A run start was not confirmed.',
-						},
-					);
+					throw rejection(this, itemIndex, response.statusCode);
 				}
-
-				let receipt: unknown;
-				try {
-					receipt = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-				} catch {
-					receipt = undefined;
-				}
-				if (
-					receipt === null ||
-					typeof receipt !== 'object' ||
-					!('runId' in receipt) ||
-					typeof receipt.runId !== 'string' ||
-					receipt.runId.trim().length === 0
-				) {
+				const runId = acceptedRunId(response.body);
+				if (runId === undefined) {
 					throw new NodeOperationError(this.getNode(), 'Whenever did not return a valid runId.', {
 						itemIndex,
 						description:
 							'A run start was not confirmed. Check that the Whenever workflow is active before retrying.',
 					});
 				}
-				results.push({ json: { runId: receipt.runId }, pairedItem: { item: itemIndex } });
+				results.push({ json: { runId }, pairedItem: { item: itemIndex } });
 			} catch (error) {
 				const nodeError =
 					error instanceof NodeApiError || error instanceof NodeOperationError
 						? error
-						: new NodeOperationError(this.getNode(), 'Unable to start the Whenever run.', {
-								itemIndex,
-							});
+						: new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 				if (!this.continueOnFail()) throw nodeError;
 				results.push({ json: { error: nodeError.message }, pairedItem: { item: itemIndex } });
 			}
