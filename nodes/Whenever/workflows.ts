@@ -49,8 +49,11 @@ export async function getWorkflows(
 	};
 }
 
-async function workflowWebhooks(context: WorkflowContext, itemIndex: number) {
-	const workflowId = context.getNodeParameter('workflowId', itemIndex, '', { extractValue: true });
+async function workflowWebhooks(
+	context: WorkflowContext,
+	workflowId: unknown,
+	itemIndex = 0,
+) {
 	if (typeof workflowId !== 'string' || workflowId.trim() === '') {
 		throw new NodeOperationError(context.getNode(), 'Select a workflow or enter its ID.', {
 			itemIndex,
@@ -77,7 +80,8 @@ async function workflowWebhooks(context: WorkflowContext, itemIndex: number) {
 }
 
 export async function getWebhooks(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-	return (await workflowWebhooks(this, 0)).map((endpoint) => ({
+	const workflowId = this.getNodeParameter('workflowId', '', { extractValue: true });
+	return (await workflowWebhooks(this, workflowId)).map((endpoint) => ({
 		name:
 			typeof endpoint.name === 'string' && endpoint.name !== ''
 				? endpoint.name
@@ -91,7 +95,8 @@ export async function selectedWebhook(
 	itemIndex: number,
 ): Promise<string> {
 	const endpointId = context.getNodeParameter('webhookId', itemIndex);
-	const endpoint = (await workflowWebhooks(context, itemIndex)).find(
+	const workflowId = context.getNodeParameter('workflowId', itemIndex, '', { extractValue: true });
+	const endpoint = (await workflowWebhooks(context, workflowId, itemIndex)).find(
 		(candidate) => candidate.endpointId === endpointId,
 	);
 	if (!endpoint || typeof endpoint.url !== 'string' || !isWebhookUrl(endpoint.url)) {
