@@ -125,6 +125,30 @@ Get Run reads at most **Event Limit** events, default 100. When `hasMoreEvents` 
 set **After Sequence** to `nextSeq` and read the next page. Even a successful run can have
 its completion event on a later page. This operation neither waits nor starts a new run.
 
+## Result-handling example
+
+Import [Start a workflow and handle its result](examples/start-and-handle-result.json) into n8n 2.41.0 or later.
+The example is inactive and contains no credentials.
+
+1. Select your Whenever account credential on **Start workflow** and **Get run**.
+2. Configure **Start workflow** with your workflow, generic webhook, and expected input.
+3. Execute the example only when you intend to run that workflow's external actions.
+4. Connect your next operation to **Use output**, where `{{ $json.output }}` contains the result.
+5. Customize **Handle missing output** for omitted output or a workflow with no observed return value.
+
+The example checks the existing run every two seconds and follows event pages using `nextSeq`.
+It retains output if an earlier page contains the completion event.
+It waits when Whenever reports `observationComplete: false`.
+
+A failed, cancelled, or timed-out run reaches **Report run failure**.
+After five minutes or 120 reads, unfinished observation reaches **Report observation timeout**.
+That timeout does not cancel the Whenever run and does not establish that it failed.
+Check the existing `runId` before starting a replacement run.
+
+Account or network errors stop the example at **Get run**. Reconnect an expired credential,
+then inspect the existing run. Restarting the whole example starts a new execution and can create a new run.
+Keep the example's observation cycle connected to **Get run**, never back to **Start workflow**.
+
 ## Errors
 
 Whenever returns HTTP 202 for a new accepted delivery and HTTP 200 for a deduplicated delivery.
