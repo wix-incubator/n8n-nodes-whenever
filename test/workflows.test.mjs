@@ -30,7 +30,7 @@ test('finds an owned workflow by name without exposing unrelated account fields'
 		}),
 	);
 	const result = await new Whenever().methods?.listSearch?.getWorkflows?.call(
-		service.context(),
+		service.loadContext(),
 		'SCORE',
 	);
 	assert.deepEqual(result, { results: [{ name: 'Score leads', value: 'workflow-1' }] });
@@ -48,7 +48,7 @@ test('offers only enabled generic webhooks for the selected workflow', async (t)
 		}),
 	);
 	const result = await new Whenever().methods?.loadOptions?.getWebhooks?.call(
-		service.context(parameters),
+		service.loadContext({ ...parameters, workflowId: { __rl: true, mode: 'list', value: 'workflow-1' } }),
 	);
 	assert.deepEqual(result, [{ name: 'Lead received', value: 'hook-1' }]);
 	assert.deepEqual(service.requests[0].body.params.arguments, { workflow_id: 'workflow-1' });

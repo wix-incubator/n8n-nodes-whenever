@@ -42,7 +42,14 @@ export async function mcpServer(t, respond) {
 			},
 		},
 	});
-	return { requests, options, context };
+	const loadContext = (parameters = {}) => ({
+		...context(parameters),
+		getNodeParameter: (name, fallback, options) => {
+			const value = parameters[name] ?? fallback;
+			return options?.extractValue && value !== null && typeof value === 'object' ? value.value : value;
+		},
+	});
+	return { requests, options, context, loadContext };
 }
 
 export function toolResult(result, id = 1) {
