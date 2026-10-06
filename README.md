@@ -113,6 +113,53 @@ The automated tests execute the built node against a local HTTP server.
 The test harness implements n8n's execution context and HTTP helper using Node.js `fetch`.
 These tests establish request and response behavior, but do not establish an actual Whenever run or n8n Cloud compatibility.
 
+## Publishing
+
+[publish.yml](.github/workflows/publish.yml) publishes version tags to the public npm registry with provenance.
+It uses the Node.js version in `.nvmrc`, runs the tests, then runs the n8n release command.
+Inside GitHub Actions, that command runs lint and build before publishing.
+The tag must match the package version, with an optional `v` prefix.
+
+Configure authentication before pushing a release tag.
+For an existing npm package, add a GitHub Actions trusted publisher in the package settings:
+
+| Field | Value |
+| --- | --- |
+| Organization or user | `wix-incubator` |
+| Repository | `n8n-nodes-whenever` |
+| Workflow filename | `publish.yml` |
+| Environment | Leave blank |
+| Allowed actions | Enable direct publishing with `npm publish` |
+
+Trusted publishing requires no repository secret.
+If the package does not exist yet, use an npm granular access token for the first publication.
+The token must permit publishing this package and bypass 2FA for unattended publishing.
+Save it as the repository's `NPM_TOKEN` Actions secret. Do not commit the token.
+After the first publication, configure the trusted publisher and remove the `NPM_TOKEN` secret.
+
+For later releases, start from a clean, updated `master` checkout containing the workflow:
+
+```sh
+git switch master
+git pull --ff-only
+npm test
+npm run lint
+npm version patch
+git push --atomic origin master --follow-tags
+```
+
+Use `minor` or `major` instead of `patch` when appropriate.
+For the initial `0.1.0` publication, replace `npm version patch` with `git tag -a v0.1.0 -m "Release 0.1.0"`.
+Only publish a version that is not already on npm.
+
+Use these commands instead of running `npm run release` locally.
+The pinned n8n CLI requires a branch named `main` for local releases, but this repository uses `master`.
+After pushing, check the **Publish** workflow in GitHub Actions and the version's provenance on npm.
+A passing local test or package dry run does not establish a successful publication.
+
+References: [n8n publishing requirements](https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes)
+and [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+
 ## Scope
 
 Version 0.1.0 starts runs through generic webhooks. It does not wait for completion or retrieve workflow results.
