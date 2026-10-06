@@ -42,7 +42,8 @@ function context(
 		getWorkflow: () => ({ id: 'workflow-1' }),
 		getWorkflowDataProxy: () => ({ $runIndex: 0 }),
 		getInputData: () => inputs.map(() => ({ json: {} })),
-		getNodeParameter: (name, index) => {
+		getNodeParameter: (name, index, fallback) => {
+			if (name === 'authentication') return fallback;
 			if (name === 'input' || name === 'textInput' || name === 'formFields') return inputs[index];
 			if (name === 'inputFormat') return inputFormat;
 			if (name === 'operation') return 'start';
