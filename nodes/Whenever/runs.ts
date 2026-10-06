@@ -83,7 +83,7 @@ export async function getRun(context: IExecuteFunctions, itemIndex: number): Pro
 	const successes = events.filter((event) => event.type === 'run_succeeded');
 	if (successes.length > 1) throw invalid();
 	const success = successes[0];
-	if (run.status !== 'succeeded' || success === undefined) return result;
+	if (success === undefined) return result;
 	if (success.outputOmitted !== undefined) {
 		if (
 			typeof success.outputOmitted !== 'string' ||

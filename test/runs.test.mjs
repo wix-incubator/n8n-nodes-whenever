@@ -60,6 +60,17 @@ test('returns a running snapshot without claiming output', async (t) => {
 	assert.equal(Object.hasOwn(result, 'output'), false);
 });
 
+test('preserves completion output while the run summary still says running', async (t) => {
+	const service = await mcpServer(t, () =>
+		toolResult(snapshot({ run: { ...run, status: 'running', endedAt: undefined } })),
+	);
+	const result = (await execute(service.context(parameters)))[0][0].json;
+	assert.equal(result.status, 'running');
+	assert.equal(result.nextSeq, 2);
+	assert.equal(result.outputState, 'available');
+	assert.deepEqual(result.output, { score: 82 });
+});
+
 test('preserves incomplete observation even when the stored status is terminal', async (t) => {
 	const service = await mcpServer(t, () => toolResult(snapshot({ observationComplete: false })));
 	const result = (await execute(service.context(parameters)))[0][0].json;
