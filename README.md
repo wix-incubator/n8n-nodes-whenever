@@ -1,7 +1,7 @@
 # n8n-nodes-whenever
 
-Start [Whenever](https://whenever.dev) workflows from n8n using a webhook URL.
-Requires n8n 1.86 or later.
+Start [Whenever](https://whenever.dev) workflows from n8n using a webhook URL or your Whenever account.
+Webhook URL connections require n8n 1.86 or later. Account connections require n8n 2.41.0 or later.
 
 ## Setup
 
@@ -33,6 +33,19 @@ The node returns a `runId` for each accepted request:
 
 Use `{{ $json.runId }}` in subsequent nodes.
 The node starts the workflow but does not wait for completion or return its results.
+
+## Account connection
+
+1. In the **Whenever** node, set **Connection** to **Whenever Account**.
+2. Create a **Whenever OAuth2 API** credential and select **Connect my account**.
+3. Approve access in Whenever.
+4. Select **Get Account** and execute the node to check the connection. It does not start a workflow.
+
+Get Account returns `isLoggedIn`, `email`, `displayName`, and `photoUrl`. Profile fields can be null.
+
+n8n renews the account token automatically. The connection itself ends 7 days after you connect,
+or sooner if it goes 3 days unused. Reconnect the credential when it ends.
+Webhook URL connections are not affected.
 
 ## License
 
