@@ -98,6 +98,19 @@ The project `.npmrc` sets `min-release-age=14`, which npm measures in days.
 This applies to local development and both GitHub workflows when npm selects dependency versions.
 Existing lockfile entries remain pinned; this setting does not independently audit their publication dates.
 
+Both workflows run the pinned `npq@3.27.0` audit before `npm ci --ignore-scripts`.
+The audit checks direct dependencies from `package.json`, not the full lockfile.
+The audit reports warnings and stops on errors.
+Warning-only runs continue without an interactive prompt, following the existing Wix public-repository setup.
+
+The npq install command uses `--package-lock-only --ignore-scripts` to avoid installing project dependencies.
+A Git diff check rejects manifest or lockfile changes before `npm ci` installs the committed versions.
+GitHub Actions use full commit hashes.
+
+The initial npq audit reports the pinned ESLint 9 version as deprecated.
+ESLint 10 breaks the n8n lint plugin because that plugin calls the removed `context.getFilename` API.
+The audit remains blocking until a compatible toolchain update or a Security-approved exception resolves this finding.
+
 ```sh
 npm ci --ignore-scripts
 npm test
@@ -124,8 +137,17 @@ It uses the Node.js version in `.nvmrc`, runs the tests, then runs the n8n relea
 Inside GitHub Actions, that command runs lint and build before publishing.
 The tag must match the package version, with an optional `v` prefix.
 
-Configure authentication before pushing a release tag.
-For an existing npm package, add a GitHub Actions trusted publisher in the package settings:
+Before the first release:
+
+1. Submit the workflow pull request for Wix Security review in **#security**, tagging Dima Ryskin and Adir Horesh.
+2. After approval, merge the pull request.
+3. Ask Security to enable GitHub Actions in the same thread.
+4. Ask a Wix npm administrator to create the initial empty package if the package does not exist.
+5. Ask the administrator to configure the following GitHub Actions trusted publisher.
+
+Every subsequent workflow change also requires Security review.
+The administrator must use a bootstrap version different from the first real release.
+For example, reserve `0.1.0` for this package and use an earlier version for the empty package.
 
 | Field | Value |
 | --- | --- |
@@ -135,11 +157,10 @@ For an existing npm package, add a GitHub Actions trusted publisher in the packa
 | Environment | Leave blank |
 | Allowed actions | Enable direct publishing with `npm publish` |
 
-Trusted publishing requires no repository secret.
-If the package does not exist yet, use an npm granular access token for the first publication.
-The token must permit publishing this package and bypass 2FA for unattended publishing.
-Save it as the repository's `NPM_TOKEN` Actions secret. Do not commit the token.
-After the first publication, configure the trusted publisher and remove the `NPM_TOKEN` secret.
+Trusted publishing uses GitHub's short-lived identity credentials and requires no repository secret.
+The publish job grants `id-token: write` for this exchange.
+The workflow has no npm token fallback.
+Coordinate the first release with the administrator because an unused trusted publisher configuration expires after two days.
 
 For later releases, start from a clean, updated `master` checkout containing the workflow:
 

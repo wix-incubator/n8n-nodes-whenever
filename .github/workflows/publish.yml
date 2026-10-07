@@ -15,21 +15,22 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
       - name: Check release version
         run: |
           VERSION=$(node -p 'require("./package.json").version')
           test "${GITHUB_REF_NAME#v}" = "$VERSION"
+      - name: Audit dependencies with npq
+        run: |
+          npx --yes --ignore-scripts npq@3.27.0 install --package-lock-only --ignore-scripts
+          git diff --exit-code -- package.json package-lock.json
+        env:
+          NPQ_PKG_MGR: npm
+          NPQ_ALLOW_NON_INTERACTIVE_INSTALL: 'true'
       - run: npm ci --ignore-scripts
       - run: npm test
       - name: Publish with provenance
-        run: |
-          if [ -n "$NPM_TOKEN" ]; then
-            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-          fi
-          npm run release
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm run release
