@@ -107,9 +107,11 @@ The npq install command uses `--package-lock-only --ignore-scripts` to avoid ins
 A Git diff check rejects manifest or lockfile changes before `npm ci` installs the committed versions.
 GitHub Actions use full commit hashes.
 
-The initial npq audit reports the pinned ESLint 9 version as deprecated.
+ESLint is pinned to the latest compatible version, `9.39.5`, which npm marks as deprecated.
 ESLint 10 breaks the n8n lint plugin because that plugin calls the removed `context.getFilename` API.
-The audit remains blocking until a compatible toolchain update or a Security-approved exception resolves this finding.
+The released n8n CLI still requires that older plugin.
+Its strict mode rejects custom compatibility configuration, and its lint rules reject dependency overrides.
+The audit remains blocking until n8n updates its tooling or Security approves an exception for this specific deprecation finding.
 
 ```sh
 npm ci --ignore-scripts
