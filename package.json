@@ -1,6 +1,10 @@
 {
-	"name": "n8n-nodes-whenever",
+	"name": "@wix/n8n-nodes-whenever",
 	"version": "0.1.0",
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
 	"description": "Start Whenever workflow runs from n8n through webhooks",
 	"license": "MIT",
 	"homepage": "https://github.com/wix-incubator/n8n-nodes-whenever#readme",
