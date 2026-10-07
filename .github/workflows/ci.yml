@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [master]
@@ -19,11 +20,14 @@ jobs:
           cache: npm
       - name: Audit dependencies with npq
         run: |
-          npx --yes --ignore-scripts npq@3.27.0 install --package-lock-only --ignore-scripts
+          set +e
+          npx --yes --ignore-scripts npq@3.27.0 --json > "$RUNNER_TEMP/npq-audit.json"
+          audit_status=$?
+          set -e
+          cat "$RUNNER_TEMP/npq-audit.json"
+          node scripts/check-npq-audit.mjs "$RUNNER_TEMP/npq-audit.json" "$audit_status"
+          npm install --package-lock-only --ignore-scripts
           git diff --exit-code -- package.json package-lock.json
-        env:
-          NPQ_PKG_MGR: npm
-          NPQ_ALLOW_NON_INTERACTIVE_INSTALL: 'true'
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run lint
