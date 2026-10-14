@@ -10,6 +10,8 @@ Webhook URL connections require n8n 1.86 or later. Account connections require n
 3. Copy the webhook URL.
 4. In n8n, create a **Whenever Webhook API** credential with that URL.
 
+n8n checks that the webhook is enabled and its workflow is active. This check does not start a workflow run.
+
 Keep the webhook URL private. Anyone with the URL can start the workflow.
 
 ## Usage
