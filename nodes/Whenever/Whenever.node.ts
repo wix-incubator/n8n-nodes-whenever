@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import type {
+	IDataObject,
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { getAccount } from './account';
 
 type WebhookRequest = { body: string; contentType: string };
 type WebhookResponse = { statusCode: number; body: unknown };
@@ -162,6 +164,66 @@ function acceptedRunId(body: unknown): string | undefined {
 	return typeof runId === 'string' && runId.trim().length > 0 ? runId : undefined;
 }
 
+type ItemOperation = (itemIndex: number) => Promise<IDataObject>;
+
+async function startWorkflow(context: IExecuteFunctions): Promise<ItemOperation> {
+	const credentials = await context.getCredentials('wheneverWebhookApi');
+	const webhookUrl = String(credentials.webhookUrl ?? '').trim();
+	if (!isWebhookUrl(webhookUrl)) {
+		throw new NodeOperationError(
+			context.getNode(),
+			'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
+		);
+	}
+
+	const nodeContext = context.getContext('node');
+	nodeContext.wheneverExecutionId ??= context.getExecutionId();
+	const deliveryScope = [
+		context.getInstanceId(),
+		context.getWorkflow().id,
+		nodeContext.wheneverExecutionId,
+		context.getNode().id,
+		context.getWorkflowDataProxy(0).$runIndex,
+	];
+	const deliveryKey = (itemIndex: number): string =>
+		createHash('sha256')
+			.update(JSON.stringify([...deliveryScope, itemIndex]))
+			.digest('hex');
+
+	return async (itemIndex) => {
+		const request = webhookRequest(context, itemIndex);
+		const response = await deliver(context, itemIndex, webhookUrl, request, deliveryKey(itemIndex));
+		if (response.statusCode < 200 || response.statusCode >= 300) {
+			throw rejection(context, itemIndex, response.statusCode);
+		}
+
+		const runId = acceptedRunId(response.body);
+		if (runId === undefined) {
+			throw new NodeOperationError(context.getNode(), 'Whenever did not return a valid runId.', {
+				itemIndex,
+				description:
+					'A run start was not confirmed. Check that the Whenever workflow is active before retrying.',
+			});
+		}
+		return { runId };
+	};
+}
+
+async function itemOperation(
+	context: IExecuteFunctions,
+	operation: unknown,
+	accountConnection: boolean,
+): Promise<ItemOperation> {
+	if (accountConnection && operation === 'getAccount') {
+		return async (itemIndex) => await getAccount(context, itemIndex);
+	}
+	if (!accountConnection && operation === 'start') return await startWorkflow(context);
+	throw new NodeOperationError(
+		context.getNode(),
+		'Select Get Account for an account connection, or Start Workflow for a webhook connection.',
+	);
+}
+
 export class Whenever implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Whenever',
@@ -169,14 +231,36 @@ export class Whenever implements INodeType {
 		icon: { light: 'file:whenever.svg', dark: 'file:whenever.svg' },
 		group: ['output'],
 		version: 1,
-		subtitle: 'Start Workflow',
+		subtitle: '={{$parameter["operation"] === "getAccount" ? "Get Account" : "Start Workflow"}}',
 		description: 'Start a Whenever workflow run and return its run ID',
 		defaults: { name: 'Whenever' },
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
 		usableAsTool: true,
-		credentials: [{ name: 'wheneverWebhookApi', required: true }],
+		credentials: [
+			{
+				name: 'wheneverWebhookApi',
+				required: true,
+				displayOptions: { show: { authentication: ['webhook'] } },
+			},
+			{
+				name: 'wheneverOAuth2Api',
+				required: true,
+				displayOptions: { show: { authentication: ['account'] } },
+			},
+		],
 		properties: [
+			{
+				displayName: 'Connection',
+				name: 'authentication',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{ name: 'Webhook URL', value: 'webhook' },
+					{ name: 'Whenever Account', value: 'account' },
+				],
+				default: 'webhook',
+			},
 			{
 				displayName: 'Operation',
 				name: 'operation',
@@ -184,7 +268,15 @@ export class Whenever implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Get Account',
+						value: 'getAccount',
+						action: 'Get the connected account',
+						description: 'Check account access without starting a workflow',
+						displayOptions: { show: { authentication: ['account'] } },
+					},
+					{
 						name: 'Start Workflow',
+						displayOptions: { show: { authentication: ['webhook'] } },
 						value: 'start',
 						action: 'Start a workflow',
 						description: 'Send input to a Whenever webhook and return the accepted run ID',
@@ -196,12 +288,14 @@ export class Whenever implements INodeType {
 				displayName:
 					'This node confirms that Whenever accepted the run. It does not wait for completion or confirm workflow success.',
 				name: 'acceptanceNotice',
+				displayOptions: { show: { operation: ['start'] } },
 				type: 'notice',
 				default: '',
 			},
 			{
 				displayName: 'Input Format',
 				name: 'inputFormat',
+				displayOptions: { show: { operation: ['start'] } },
 				type: 'options',
 				noDataExpression: true,
 				options: [
@@ -229,7 +323,7 @@ export class Whenever implements INodeType {
 				type: 'json',
 				required: true,
 				default: '{}',
-				displayOptions: { show: { inputFormat: ['json'] } },
+				displayOptions: { show: { operation: ['start'], inputFormat: ['json'] } },
 				description:
 					'JSON sent to Whenever as the workflow input. Expressions can supply an object.',
 			},
@@ -240,7 +334,7 @@ export class Whenever implements INodeType {
 				typeOptions: { multipleValues: true },
 				default: {},
 				placeholder: 'Add Field',
-				displayOptions: { show: { inputFormat: ['form'] } },
+				displayOptions: { show: { operation: ['start'], inputFormat: ['form'] } },
 				description: 'Named values sent to Whenever. All values arrive as strings.',
 				options: [
 					{
@@ -273,7 +367,7 @@ export class Whenever implements INodeType {
 				typeOptions: { rows: 5 },
 				required: true,
 				default: '',
-				displayOptions: { show: { inputFormat: ['text'] } },
+				displayOptions: { show: { operation: ['start'], inputFormat: ['text'] } },
 				description:
 					'Text sent unchanged to Whenever. The workflow must interpret CSV or XML itself.',
 			},
@@ -281,55 +375,19 @@ export class Whenever implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const credentials = await this.getCredentials('wheneverWebhookApi');
-		const webhookUrl = String(credentials.webhookUrl ?? '').trim();
-		if (!isWebhookUrl(webhookUrl)) {
-			throw new NodeOperationError(
-				this.getNode(),
-				'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
-			);
-		}
-
-		const nodeContext = this.getContext('node');
-		nodeContext.wheneverExecutionId ??= this.getExecutionId();
-		const deliveryScope = [
-			this.getInstanceId(),
-			this.getWorkflow().id,
-			nodeContext.wheneverExecutionId,
-			this.getNode().id,
-			this.getWorkflowDataProxy(0).$runIndex,
-		];
-		const deliveryKey = (itemIndex: number): string =>
-			createHash('sha256')
-				.update(JSON.stringify([...deliveryScope, itemIndex]))
-				.digest('hex');
+		const operation = await itemOperation(
+			this,
+			this.getNodeParameter('operation', 0, 'start'),
+			this.getNodeParameter('authentication', 0, 'webhook') === 'account',
+		);
 
 		const results: INodeExecutionData[] = [];
 		for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
 			try {
-				const request = webhookRequest(this, itemIndex);
-				const response = await deliver(
-					this,
-					itemIndex,
-					webhookUrl,
-					request,
-					deliveryKey(itemIndex),
-				);
-				if (response.statusCode < 200 || response.statusCode >= 300) {
-					throw rejection(this, itemIndex, response.statusCode);
-				}
-				const runId = acceptedRunId(response.body);
-				if (runId === undefined) {
-					throw new NodeOperationError(this.getNode(), 'Whenever did not return a valid runId.', {
-						itemIndex,
-						description:
-							'A run start was not confirmed. Check that the Whenever workflow is active before retrying.',
-					});
-				}
-				results.push({ json: { runId }, pairedItem: { item: itemIndex } });
+				results.push({ json: await operation(itemIndex), pairedItem: { item: itemIndex } });
 			} catch (error) {
 				const nodeError =
-					error instanceof NodeApiError || error instanceof NodeOperationError
+					error instanceof NodeApiError
 						? error
 						: new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 				if (!this.continueOnFail()) throw nodeError;
