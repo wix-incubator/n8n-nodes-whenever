@@ -33,7 +33,7 @@ export class WheneverOAuth2Api implements ICredentialType {
 		},
 		{
 			displayName:
-				'Whenever account authorization expires after one hour. Reconnect before using account operations after expiry.',
+				'n8n renews access automatically, but the connection ends after 7 days, or after 3 days unused. Reconnect it then.',
 			name: 'expiryNotice',
 			type: 'notice',
 			default: '',

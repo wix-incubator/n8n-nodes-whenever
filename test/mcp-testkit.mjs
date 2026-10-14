@@ -1,6 +1,9 @@
 import { createServer } from 'node:http';
 
-export async function mcpServer(t, respond) {
+const ignores = (option, status) =>
+	option === true || (option?.ignore === true && !option.except.includes(status));
+
+export async function mcpServer(t, respond, refresh = async () => 'refreshed-account-token') {
 	const requests = [];
 	const server = createServer(async (request, reply) => {
 		let text = '';
@@ -32,13 +35,27 @@ export async function mcpServer(t, respond) {
 		helpers: {
 			httpRequestWithAuthentication: async (credentialType, request) => {
 				options.push({ credentialType, ...request });
-				const response = await fetch(url, {
-					method: request.method,
-					headers: { ...request.headers, Authorization: 'Bearer test-account-token' },
-					body: JSON.stringify(request.body),
-					redirect: request.disableFollowRedirect ? 'manual' : 'follow',
-				});
-				return { statusCode: response.status, body: await response.json() };
+				const send = async (token) => {
+					const response = await fetch(url, {
+						method: request.method,
+						headers: { ...request.headers, Authorization: `Bearer ${token}` },
+						body: JSON.stringify(request.body),
+						redirect: request.disableFollowRedirect ? 'manual' : 'follow',
+					});
+					return { statusCode: response.status, body: await response.json() };
+				};
+				let response = await send('test-account-token');
+				// n8n refreshes an OAuth2 token only when the 401 reaches it as a thrown error.
+				if (response.statusCode === 401 && !ignores(request.ignoreHttpStatusErrors, 401)) {
+					response = await send(await refresh());
+				}
+				if (
+					response.statusCode >= 400 &&
+					!ignores(request.ignoreHttpStatusErrors, response.statusCode)
+				) {
+					throw new Error(`Request failed with status code ${response.statusCode}`);
+				}
+				return response;
 			},
 		},
 	});

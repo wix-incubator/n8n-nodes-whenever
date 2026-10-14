@@ -60,12 +60,33 @@ test('accepts an authenticated account whose profile fields are unavailable', as
 	assert.equal(result[0][0].json.email, null);
 });
 
-test('asks for reconnection after the account token expires', async (t) => {
-	const service = await mcpServer(t, () => ({ status: 401, body: { error: 'invalid_token' } }));
+test('renews an expired account token and repeats the request', async (t) => {
+	const service = await mcpServer(t, (_body, count) =>
+		count === 1 ? { status: 401, body: { error: 'invalid_token' } } : toolResult(account),
+	);
+	const result = await execute(
+		service.context({ authentication: 'account', operation: 'getAccount' }),
+	);
+	assert.deepEqual(result, [[{ json: account, pairedItem: { item: 0 } }]]);
+	assert.deepEqual(
+		service.requests.map(({ headers }) => headers.authorization),
+		['Bearer test-account-token', 'Bearer refreshed-account-token'],
+	);
+});
+
+test('asks for reconnection when the account connection has ended', async (t) => {
+	const service = await mcpServer(
+		t,
+		() => ({ status: 401, body: { error: 'invalid_token' } }),
+		async () => {
+			throw new Error('invalid_grant');
+		},
+	);
 	await assert.rejects(
 		execute(service.context({ authentication: 'account', operation: 'getAccount' })),
 		/Reconnect/,
 	);
+	assert.equal(service.requests.length, 1);
 });
 
 test('rejects a refused MCP tool result even when HTTP succeeds', async (t) => {

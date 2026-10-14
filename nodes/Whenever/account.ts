@@ -28,7 +28,7 @@ export async function callTool(
 				body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
 				json: true,
 				returnFullResponse: true,
-				ignoreHttpStatusErrors: true,
+				ignoreHttpStatusErrors: { ignore: true, except: [401] },
 				disableFollowRedirect: true,
 				timeout: 30000,
 			},
@@ -37,12 +37,6 @@ export async function callTool(
 		throw new NodeOperationError(
 			context.getNode(),
 			'Whenever could not read the account. Reconnect the account if its authorization expired.',
-		);
-	}
-	if (response.statusCode === 401) {
-		throw new NodeOperationError(
-			context.getNode(),
-			'Reconnect your Whenever account. Its authorization is missing or expired.',
 		);
 	}
 	if (response.statusCode < 200 || response.statusCode >= 300) {
