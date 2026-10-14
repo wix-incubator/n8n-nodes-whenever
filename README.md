@@ -47,6 +47,18 @@ n8n renews the account token automatically. The connection itself ends 7 days af
 or sooner if it goes 3 days unused. Reconnect the credential when it ends.
 Webhook URL connections are not affected.
 
+## Start a workflow from your account
+
+1. Set **Connection** to **Whenever Account**.
+2. Select **Start Workflow**.
+3. Choose a **Workflow** from the list, or enter its ID with **By ID**.
+4. Choose one of its enabled generic webhooks in **Webhook Name or ID**.
+5. Enter your input and execute the node.
+
+The node looks up the webhook on every run, so a disabled or removed webhook fails before anything is sent.
+Your account token is never sent to the webhook.
+If a workflow is missing from the list, enter it **By ID**.
+
 ## License
 
 [MIT](LICENSE)

@@ -60,7 +60,7 @@ function context(
 		}),
 		continueOnFail: () => false,
 		helpers: {
-			httpRequestWithAuthentication: async (_credentialType, options) => {
+			httpRequest: async (options) => {
 				const result = await fetch(options.url, {
 					method: options.method,
 					headers: options.headers,
@@ -317,7 +317,7 @@ test('reports the transport error code without the webhook URL', async () => {
 	await assert.rejects(
 		execute(undefined, {
 			helpers: {
-				httpRequestWithAuthentication: async () => {
+				httpRequest: async () => {
 					throw Object.assign(new Error(`connect ECONNREFUSED ${webhookUrl}`), {
 						code: 'ECONNREFUSED',
 					});
@@ -337,7 +337,7 @@ test('reports a transport error code wrapped in a cause', async () => {
 	await assert.rejects(
 		execute(undefined, {
 			helpers: {
-				httpRequestWithAuthentication: async () => {
+				httpRequest: async () => {
 					throw new Error('request failed', { cause: { code: 'ETIMEDOUT' } });
 				},
 			},
@@ -353,7 +353,7 @@ test('hides a transport failure that carries no error code', async () => {
 	await assert.rejects(
 		execute(undefined, {
 			helpers: {
-				httpRequestWithAuthentication: async () => {
+				httpRequest: async () => {
 					throw new Error(`Cannot connect to ${webhookUrl}`);
 				},
 			},

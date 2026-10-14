@@ -5,6 +5,10 @@ export function objectValue(value: unknown): value is IDataObject {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+export function arrayOf<T>(value: unknown, isItem: (item: unknown) => item is T): T[] | undefined {
+	return Array.isArray(value) && value.every(isItem) ? value : undefined;
+}
+
 export async function callTool(
 	context: IExecuteFunctions | ILoadOptionsFunctions,
 	name: string,

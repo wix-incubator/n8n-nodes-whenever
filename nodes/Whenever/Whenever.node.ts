@@ -8,19 +8,10 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { getAccount } from './account';
+import { getWebhooks, getWorkflows, isWebhookUrl, webhookSelector } from './workflows';
 
 type WebhookRequest = { body: string; contentType: string };
 type WebhookResponse = { statusCode: number; body: unknown };
-
-function isWebhookUrl(value: string): boolean {
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		return false;
-	}
-	return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.hash;
-}
 
 function textValue(
 	context: IExecuteFunctions,
@@ -101,26 +92,22 @@ async function deliver(
 	idempotencyKey: string,
 ): Promise<WebhookResponse> {
 	try {
-		return (await context.helpers.httpRequestWithAuthentication.call(
-			context,
-			'wheneverWebhookApi',
-			{
-				method: 'POST',
-				url: webhookUrl,
-				headers: {
-					'Content-Type': request.contentType,
-					Accept: 'application/json',
-					'Idempotency-Key': idempotencyKey,
-				},
-				body: request.body,
-				json: false,
-				encoding: 'text',
-				returnFullResponse: true,
-				ignoreHttpStatusErrors: true,
-				disableFollowRedirect: true,
-				timeout: 30000,
+		return await context.helpers.httpRequest({
+			method: 'POST',
+			url: webhookUrl,
+			headers: {
+				'Content-Type': request.contentType,
+				Accept: 'application/json',
+				'Idempotency-Key': idempotencyKey,
 			},
-		)) as WebhookResponse;
+			body: request.body,
+			json: false,
+			encoding: 'text',
+			returnFullResponse: true,
+			ignoreHttpStatusErrors: true,
+			disableFollowRedirect: true,
+			timeout: 30000,
+		});
 	} catch (error) {
 		const code = transportErrorCode(error);
 		throw new NodeOperationError(context.getNode(), 'Whenever could not confirm acceptance.', {
@@ -166,14 +153,20 @@ function acceptedRunId(body: unknown): string | undefined {
 
 type ItemOperation = (itemIndex: number) => Promise<IDataObject>;
 
-async function startWorkflow(context: IExecuteFunctions): Promise<ItemOperation> {
-	const credentials = await context.getCredentials('wheneverWebhookApi');
-	const webhookUrl = String(credentials.webhookUrl ?? '').trim();
-	if (!isWebhookUrl(webhookUrl)) {
-		throw new NodeOperationError(
-			context.getNode(),
-			'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
-		);
+async function startWorkflow(
+	context: IExecuteFunctions,
+	accountConnection: boolean,
+): Promise<ItemOperation> {
+	let webhookUrl = '';
+	if (!accountConnection) {
+		const credentials = await context.getCredentials('wheneverWebhookApi');
+		webhookUrl = String(credentials.webhookUrl ?? '').trim();
+		if (!isWebhookUrl(webhookUrl)) {
+			throw new NodeOperationError(
+				context.getNode(),
+				'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
+			);
+		}
 	}
 
 	const nodeContext = context.getContext('node');
@@ -190,9 +183,16 @@ async function startWorkflow(context: IExecuteFunctions): Promise<ItemOperation>
 			.update(JSON.stringify([...deliveryScope, itemIndex]))
 			.digest('hex');
 
+	const selectedWebhook = webhookSelector(context);
 	return async (itemIndex) => {
 		const request = webhookRequest(context, itemIndex);
-		const response = await deliver(context, itemIndex, webhookUrl, request, deliveryKey(itemIndex));
+		const response = await deliver(
+			context,
+			itemIndex,
+			accountConnection ? await selectedWebhook(itemIndex) : webhookUrl,
+			request,
+			deliveryKey(itemIndex),
+		);
 		if (response.statusCode < 200 || response.statusCode >= 300) {
 			throw rejection(context, itemIndex, response.statusCode);
 		}
@@ -217,10 +217,10 @@ async function itemOperation(
 	if (accountConnection && operation === 'getAccount') {
 		return async (itemIndex) => await getAccount(context, itemIndex);
 	}
-	if (!accountConnection && operation === 'start') return await startWorkflow(context);
+	if (operation === 'start') return await startWorkflow(context, accountConnection);
 	throw new NodeOperationError(
 		context.getNode(),
-		'Select Get Account for an account connection, or Start Workflow for a webhook connection.',
+		'A webhook connection supports only Start Workflow.',
 	);
 }
 
@@ -276,13 +276,41 @@ export class Whenever implements INodeType {
 					},
 					{
 						name: 'Start Workflow',
-						displayOptions: { show: { authentication: ['webhook'] } },
 						value: 'start',
 						action: 'Start a workflow',
 						description: 'Send input to a Whenever webhook and return the accepted run ID',
 					},
 				],
 				default: 'start',
+			},
+			{
+				displayName: 'Workflow',
+				name: 'workflowId',
+				type: 'resourceLocator',
+				default: { mode: 'list', value: '' },
+				required: true,
+				displayOptions: { show: { authentication: ['account'], operation: ['start'] } },
+				modes: [
+					{
+						displayName: 'From List',
+						name: 'list',
+						type: 'list',
+						typeOptions: { searchListMethod: 'getWorkflows', searchable: true },
+					},
+					{ displayName: 'By ID', name: 'id', type: 'string' },
+				],
+				description: 'Workflow to start. If the account list is incomplete, enter the workflow ID.',
+			},
+			{
+				displayName: 'Webhook Name or ID',
+				name: 'webhookId',
+				type: 'options',
+				default: '',
+				required: true,
+				typeOptions: { loadOptionsMethod: 'getWebhooks', loadOptionsDependsOn: ['workflowId'] },
+				displayOptions: { show: { authentication: ['account'], operation: ['start'] } },
+				description:
+					'Enabled generic webhook to call. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName:
@@ -373,6 +401,8 @@ export class Whenever implements INodeType {
 			},
 		],
 	};
+
+	methods = { listSearch: { getWorkflows }, loadOptions: { getWebhooks } };
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const operation = await itemOperation(
