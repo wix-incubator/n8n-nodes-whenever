@@ -302,7 +302,7 @@
         -400
       ],
       "parameters": {
-        "content": "## Before running\nSelect your Whenever account credential on Start workflow and Get run. Choose a workflow and enabled generic webhook. Set the expected input.\n\nRunning this example starts a real workflow with its external effects. Account authorization expires after one hour.\n\nObservation stops after five minutes or 120 reads. The timeout does not cancel the Whenever run. Use output exposes $json.output. Handle missing output retains the omission reason or lack of observed output.",
+        "content": "## Before running\nSelect your Whenever account credential on Start workflow and Get run. Choose a workflow and enabled generic webhook. Set the expected input.\n\nRunning this example starts a real workflow with its external effects. The account connection lasts up to 7 days. Reconnect it when it ends.\n\nObservation stops after five minutes or 120 reads. The timeout does not cancel the Whenever run. Use output exposes $json.output. Handle missing output retains the omission reason or lack of observed output.",
         "height": 360,
         "width": 540
       }
