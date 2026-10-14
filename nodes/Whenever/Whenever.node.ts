@@ -8,6 +8,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { getAccount } from './account';
+import { getRun } from './runs';
 import { getWebhooks, getWorkflows, isWebhookUrl, webhookSelector } from './workflows';
 
 type WebhookRequest = { body: string; contentType: string };
@@ -217,6 +218,9 @@ async function itemOperation(
 	if (accountConnection && operation === 'getAccount') {
 		return async (itemIndex) => await getAccount(context, itemIndex);
 	}
+	if (accountConnection && operation === 'getRun') {
+		return async (itemIndex) => await getRun(context, itemIndex);
+	}
 	if (operation === 'start') return await startWorkflow(context, accountConnection);
 	throw new NodeOperationError(
 		context.getNode(),
@@ -231,8 +235,9 @@ export class Whenever implements INodeType {
 		icon: { light: 'file:whenever.svg', dark: 'file:whenever.svg' },
 		group: ['output'],
 		version: 1,
-		subtitle: '={{$parameter["operation"] === "getAccount" ? "Get Account" : "Start Workflow"}}',
-		description: 'Start a Whenever workflow run and return its run ID',
+		subtitle:
+			'={{({getAccount: "Get Account", getRun: "Get Run", start: "Start Workflow"})[$parameter["operation"]]}}',
+		description: 'Start Whenever workflows and read their run results',
 		defaults: { name: 'Whenever' },
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
@@ -268,6 +273,13 @@ export class Whenever implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
+						name: 'Get Run',
+						value: 'getRun',
+						action: 'Get a run',
+						description: 'Read run status and output from a bounded event page',
+						displayOptions: { show: { authentication: ['account'] } },
+					},
+					{
 						name: 'Get Account',
 						value: 'getAccount',
 						action: 'Get the connected account',
@@ -282,6 +294,34 @@ export class Whenever implements INodeType {
 					},
 				],
 				default: 'start',
+			},
+			{
+				displayName: 'Run ID',
+				name: 'runId',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: { show: { authentication: ['account'], operation: ['getRun'] } },
+				description: 'Run ID returned by Start Workflow',
+			},
+			{
+				displayName: 'After Sequence',
+				name: 'afterSeq',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0, numberPrecision: 0 },
+				displayOptions: { show: { authentication: ['account'], operation: ['getRun'] } },
+				description:
+					'Read events after this sequence. Use nextSeq from the preceding page to continue.',
+			},
+			{
+				displayName: 'Event Limit',
+				name: 'eventLimit',
+				type: 'number',
+				default: 100,
+				typeOptions: { minValue: 1, maxValue: 100, numberPrecision: 0 },
+				displayOptions: { show: { authentication: ['account'], operation: ['getRun'] } },
+				description: 'Maximum number of stored events to read in this request',
 			},
 			{
 				displayName: 'Workflow',
