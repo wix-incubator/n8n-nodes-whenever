@@ -76,6 +76,20 @@ The node returns the run's `status`: `running`, `succeeded`, `failed`, `timed_ou
 Get Run reads one page of up to **Event Limit** events and does not wait.
 When `hasMoreEvents` is true, set **After Sequence** to `nextSeq` and read again.
 
+## Wait for a result
+
+Import [examples/start-and-handle-result.json](examples/start-and-handle-result.json) into n8n 2.41.0 or later.
+It starts a workflow, checks the run every two seconds, and passes the result to **Use output**.
+
+1. Select your account credential on **Start workflow** and **Get run**.
+2. On **Start workflow**, choose your workflow, webhook, and input.
+3. Connect your next step to **Use output**, where `{{ $json.output }}` holds the result.
+
+A failed run goes to **Report run failure**, and a run with no result goes to **Handle missing output**.
+After five minutes or 120 checks, the example stops waiting and goes to **Report observation timeout**.
+The run itself keeps going. Check its `runId` before starting it again.
+Keep the loop pointed at **Get run**. Looping back to **Start workflow** starts a new run.
+
 ## License
 
 [MIT](LICENSE)
