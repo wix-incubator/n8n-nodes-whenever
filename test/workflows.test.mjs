@@ -48,7 +48,10 @@ test('offers only enabled generic webhooks for the selected workflow', async (t)
 		}),
 	);
 	const result = await new Whenever().methods?.loadOptions?.getWebhooks?.call(
-		service.loadContext({ ...parameters, workflowId: { __rl: true, mode: 'list', value: 'workflow-1' } }),
+		service.loadContext({
+			...parameters,
+			workflowId: { __rl: true, mode: 'list', value: 'workflow-1' },
+		}),
 	);
 	assert.deepEqual(result, [{ name: 'Lead received', value: 'hook-1' }]);
 	assert.deepEqual(service.requests[0].body.params.arguments, { workflow_id: 'workflow-1' });
@@ -71,6 +74,22 @@ test('starts the selected webhook without forwarding the account token', async (
 	assert.deepEqual(
 		service.options.map(({ credentialType }) => credentialType),
 		['wheneverOAuth2Api'],
+	);
+});
+
+test('looks up the webhooks of a workflow once per run', async (t) => {
+	const service = await mcpServer(t, () => toolResult({ endpoints: [webhook] }));
+	const context = service.context(parameters, [{}, {}]);
+	const deliveries = [];
+	context.helpers.httpRequest = async (request) => {
+		deliveries.push(request);
+		return { statusCode: 202, body: { runId: `run-${deliveries.length}` } };
+	};
+	await new Whenever().execute.call(context);
+	assert.equal(service.requests.length, 1);
+	assert.deepEqual(
+		deliveries.map(({ url }) => url),
+		[webhook.url, webhook.url],
 	);
 });
 

@@ -8,7 +8,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { getAccount } from './account';
-import { getWebhooks, getWorkflows, isWebhookUrl, selectedWebhook } from './workflows';
+import { getWebhooks, getWorkflows, isWebhookUrl, webhookSelector } from './workflows';
 
 type WebhookRequest = { body: string; contentType: string };
 type WebhookResponse = { statusCode: number; body: unknown };
@@ -90,11 +90,10 @@ async function deliver(
 	webhookUrl: string,
 	request: WebhookRequest,
 	idempotencyKey: string,
-	accountConnection: boolean,
 ): Promise<WebhookResponse> {
 	try {
-		const options = {
-			method: 'POST' as const,
+		return await context.helpers.httpRequest({
+			method: 'POST',
 			url: webhookUrl,
 			headers: {
 				'Content-Type': request.contentType,
@@ -103,19 +102,12 @@ async function deliver(
 			},
 			body: request.body,
 			json: false,
-			encoding: 'text' as const,
+			encoding: 'text',
 			returnFullResponse: true,
 			ignoreHttpStatusErrors: true,
 			disableFollowRedirect: true,
 			timeout: 30000,
-		};
-		return accountConnection
-			? await context.helpers.httpRequest(options)
-			: await context.helpers.httpRequestWithAuthentication.call(
-					context,
-					'wheneverWebhookApi',
-					options,
-				);
+		});
 	} catch (error) {
 		const code = transportErrorCode(error);
 		throw new NodeOperationError(context.getNode(), 'Whenever could not confirm acceptance.', {
@@ -191,15 +183,15 @@ async function startWorkflow(
 			.update(JSON.stringify([...deliveryScope, itemIndex]))
 			.digest('hex');
 
+	const selectedWebhook = webhookSelector(context);
 	return async (itemIndex) => {
 		const request = webhookRequest(context, itemIndex);
 		const response = await deliver(
 			context,
 			itemIndex,
-			accountConnection ? await selectedWebhook(context, itemIndex) : webhookUrl,
+			accountConnection ? await selectedWebhook(itemIndex) : webhookUrl,
 			request,
 			deliveryKey(itemIndex),
-			accountConnection,
 		);
 		if (response.statusCode < 200 || response.statusCode >= 300) {
 			throw rejection(context, itemIndex, response.statusCode);

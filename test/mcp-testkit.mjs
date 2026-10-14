@@ -63,7 +63,9 @@ export async function mcpServer(t, respond, refresh = async () => 'refreshed-acc
 		...context(parameters),
 		getNodeParameter: (name, fallback, options) => {
 			const value = parameters[name] ?? fallback;
-			return options?.extractValue && value !== null && typeof value === 'object' ? value.value : value;
+			return options?.extractValue && value !== null && typeof value === 'object'
+				? value.value
+				: value;
 		},
 	});
 	return { requests, options, context, loadContext };
