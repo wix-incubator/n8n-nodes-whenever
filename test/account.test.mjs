@@ -29,7 +29,7 @@ for (const body of [
 		const service = await mcpServer(t, () => ({ body }));
 		await assert.rejects(
 			execute(service.context({ authentication: 'account', operation: 'getAccount' })),
-			/MCP response|structured account data/,
+			/MCP response|structured data/,
 		);
 	});
 }
@@ -89,6 +89,19 @@ test('asks for reconnection when the account connection has ended', async (t) =>
 	assert.equal(service.requests.length, 1);
 });
 
+test('names the failing item when an account request fails', async (t) => {
+	const service = await mcpServer(t, (_body, count) =>
+		count === 1 ? toolResult(account) : { status: 500, body: {} },
+	);
+	await assert.rejects(
+		execute(service.context({ authentication: 'account', operation: 'getAccount' }, [{}, {}])),
+		(error) => {
+			assert.equal(error.context.itemIndex, 1);
+			return true;
+		},
+	);
+});
+
 test('rejects a refused MCP tool result even when HTTP succeeds', async (t) => {
 	const response = toolResult({ code: 'NO_WIX_SESSION', message: 'private upstream detail' });
 	response.body.result.isError = true;
@@ -119,7 +132,7 @@ test('returns a safe error item on account transport failure with Continue On Fa
 		throw new Error('Authorization: Bearer private-token');
 	};
 	const result = await execute(context);
-	assert.match(result[0][0].json.error, /could not read/);
+	assert.match(result[0][0].json.error, /could not be reached/);
 	assert.doesNotMatch(JSON.stringify(result), /private-token/);
 	assert.deepEqual(result[0][0].pairedItem, { item: 0 });
 });

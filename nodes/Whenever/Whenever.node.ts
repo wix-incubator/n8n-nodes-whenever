@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
+	IDataObject,
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeType,
@@ -163,6 +164,66 @@ function acceptedRunId(body: unknown): string | undefined {
 	return typeof runId === 'string' && runId.trim().length > 0 ? runId : undefined;
 }
 
+type ItemOperation = (itemIndex: number) => Promise<IDataObject>;
+
+async function startWorkflow(context: IExecuteFunctions): Promise<ItemOperation> {
+	const credentials = await context.getCredentials('wheneverWebhookApi');
+	const webhookUrl = String(credentials.webhookUrl ?? '').trim();
+	if (!isWebhookUrl(webhookUrl)) {
+		throw new NodeOperationError(
+			context.getNode(),
+			'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
+		);
+	}
+
+	const nodeContext = context.getContext('node');
+	nodeContext.wheneverExecutionId ??= context.getExecutionId();
+	const deliveryScope = [
+		context.getInstanceId(),
+		context.getWorkflow().id,
+		nodeContext.wheneverExecutionId,
+		context.getNode().id,
+		context.getWorkflowDataProxy(0).$runIndex,
+	];
+	const deliveryKey = (itemIndex: number): string =>
+		createHash('sha256')
+			.update(JSON.stringify([...deliveryScope, itemIndex]))
+			.digest('hex');
+
+	return async (itemIndex) => {
+		const request = webhookRequest(context, itemIndex);
+		const response = await deliver(context, itemIndex, webhookUrl, request, deliveryKey(itemIndex));
+		if (response.statusCode < 200 || response.statusCode >= 300) {
+			throw rejection(context, itemIndex, response.statusCode);
+		}
+
+		const runId = acceptedRunId(response.body);
+		if (runId === undefined) {
+			throw new NodeOperationError(context.getNode(), 'Whenever did not return a valid runId.', {
+				itemIndex,
+				description:
+					'A run start was not confirmed. Check that the Whenever workflow is active before retrying.',
+			});
+		}
+		return { runId };
+	};
+}
+
+async function itemOperation(
+	context: IExecuteFunctions,
+	operation: unknown,
+	accountConnection: boolean,
+): Promise<ItemOperation> {
+	if (accountConnection && operation === 'getAccount') {
+		return async (itemIndex) => await getAccount(context, itemIndex);
+	}
+	if (!accountConnection && operation === 'start') return await startWorkflow(context);
+	throw new NodeOperationError(
+		context.getNode(),
+		'Select Get Account for an account connection, or Start Workflow for a webhook connection.',
+	);
+}
+
 export class Whenever implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Whenever',
@@ -314,84 +375,19 @@ export class Whenever implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		if (this.getNodeParameter('authentication', 0, 'webhook') === 'account') {
-			const results: INodeExecutionData[] = [];
-			for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
-				try {
-					if (this.getNodeParameter('operation', itemIndex) !== 'getAccount') {
-						throw new NodeOperationError(
-							this.getNode(),
-							'Select Get Account for this connection.',
-							{ itemIndex },
-						);
-					}
-					results.push({ json: await getAccount(this), pairedItem: { item: itemIndex } });
-				} catch (error) {
-					const nodeError = new NodeOperationError(this.getNode(), error as Error, { itemIndex });
-					if (!this.continueOnFail()) throw nodeError;
-					results.push({
-						json: { error: (error as Error).message },
-						pairedItem: { item: itemIndex },
-					});
-				}
-			}
-			return [results];
-		}
-		if (this.getNodeParameter('operation', 0, 'start') !== 'start') {
-			throw new NodeOperationError(
-				this.getNode(),
-				'A webhook connection supports only Start Workflow.',
-			);
-		}
-		const credentials = await this.getCredentials('wheneverWebhookApi');
-		const webhookUrl = String(credentials.webhookUrl ?? '').trim();
-		if (!isWebhookUrl(webhookUrl)) {
-			throw new NodeOperationError(
-				this.getNode(),
-				'Webhook URL must be a valid HTTP or HTTPS URL without embedded credentials or a fragment.',
-			);
-		}
-
-		const nodeContext = this.getContext('node');
-		nodeContext.wheneverExecutionId ??= this.getExecutionId();
-		const deliveryScope = [
-			this.getInstanceId(),
-			this.getWorkflow().id,
-			nodeContext.wheneverExecutionId,
-			this.getNode().id,
-			this.getWorkflowDataProxy(0).$runIndex,
-		];
-		const deliveryKey = (itemIndex: number): string =>
-			createHash('sha256')
-				.update(JSON.stringify([...deliveryScope, itemIndex]))
-				.digest('hex');
+		const operation = await itemOperation(
+			this,
+			this.getNodeParameter('operation', 0, 'start'),
+			this.getNodeParameter('authentication', 0, 'webhook') === 'account',
+		);
 
 		const results: INodeExecutionData[] = [];
 		for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
 			try {
-				const request = webhookRequest(this, itemIndex);
-				const response = await deliver(
-					this,
-					itemIndex,
-					webhookUrl,
-					request,
-					deliveryKey(itemIndex),
-				);
-				if (response.statusCode < 200 || response.statusCode >= 300) {
-					throw rejection(this, itemIndex, response.statusCode);
-				}
-				const runId = acceptedRunId(response.body);
-				if (runId === undefined) {
-					throw new NodeOperationError(this.getNode(), 'Whenever did not return a valid runId.', {
-						itemIndex,
-						description:
-							'A run start was not confirmed. Check that the Whenever workflow is active before retrying.',
-					});
-				}
-				results.push({ json: { runId }, pairedItem: { item: itemIndex } });
+				results.push({ json: await operation(itemIndex), pairedItem: { item: itemIndex } });
 			} catch (error) {
 				const nodeError =
-					error instanceof NodeApiError || error instanceof NodeOperationError
+					error instanceof NodeApiError
 						? error
 						: new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 				if (!this.continueOnFail()) throw nodeError;
