@@ -1,9 +1,113 @@
 import type { IDataObject, IExecuteFunctions } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { callTool, objectValue } from './mcp';
+import { arrayOf, callTool, objectValue } from './mcp';
+
+const RUN_STATUSES = ['running', 'succeeded', 'failed', 'timed_out', 'cancelled'];
+const FAILURE_FIELDS = ['message', 'kind', 'code', 'detail', 'operation'];
+const OMISSION_REASONS = ['too_large', 'unserializable'];
+
+type Run = {
+	runId: string;
+	workflowId: string;
+	version: string;
+	status: string;
+	startedAt: number;
+	endedAt?: number;
+	failure?: IDataObject;
+};
+
+type RunPage = {
+	run: Run;
+	events: IDataObject[];
+	nextSeq: number;
+	truncated: boolean;
+	observationComplete?: boolean;
+};
 
 function sequence(value: unknown): value is number {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isFailure(value: unknown): value is IDataObject {
+	return (
+		objectValue(value) &&
+		FAILURE_FIELDS.every((key) => value[key] === undefined || typeof value[key] === 'string')
+	);
+}
+
+function isRun(value: unknown, runId: string): value is Run {
+	return (
+		objectValue(value) &&
+		value.runId === runId &&
+		typeof value.workflowId === 'string' &&
+		typeof value.version === 'string' &&
+		typeof value.status === 'string' &&
+		RUN_STATUSES.includes(value.status) &&
+		sequence(value.startedAt) &&
+		(value.endedAt === undefined || sequence(value.endedAt)) &&
+		(value.failure === undefined || isFailure(value.failure))
+	);
+}
+
+function readPage(
+	data: IDataObject,
+	runId: string,
+	afterSeq: number,
+	limit: number,
+): RunPage | undefined {
+	const { run, nextSeq, truncated, observationComplete } = data;
+	if (
+		!isRun(run, runId) ||
+		!sequence(nextSeq) ||
+		nextSeq < afterSeq ||
+		typeof truncated !== 'boolean' ||
+		(truncated && nextSeq === afterSeq) ||
+		(observationComplete !== undefined && typeof observationComplete !== 'boolean')
+	) {
+		return undefined;
+	}
+
+	const pageEvent = (event: unknown): event is IDataObject =>
+		objectValue(event) &&
+		event.runId === runId &&
+		sequence(event.seq) &&
+		event.seq > afterSeq &&
+		event.seq <= nextSeq &&
+		typeof event.type === 'string';
+	const events = arrayOf(data.events, pageEvent);
+	if (!events || events.length > limit) return undefined;
+
+	return { run, events, nextSeq, truncated, observationComplete };
+}
+
+function outputOf(success: IDataObject | undefined): IDataObject | undefined {
+	if (success === undefined) return { outputState: 'not_observed' };
+
+	const { outputOmitted, outputJson } = success;
+	if (outputOmitted !== undefined) {
+		if (
+			outputJson !== undefined ||
+			typeof outputOmitted !== 'string' ||
+			!OMISSION_REASONS.includes(outputOmitted)
+		) {
+			return undefined;
+		}
+		return { outputState: 'omitted', outputOmitted };
+	}
+	if (outputJson === undefined) return { outputState: 'none' };
+	if (typeof outputJson !== 'string' || outputJson.length > 20000) return undefined;
+
+	try {
+		return { outputState: 'available', output: JSON.parse(outputJson) };
+	} catch {
+		return undefined;
+	}
+}
+
+function knownFailureFields(failure: IDataObject): IDataObject {
+	return Object.fromEntries(
+		FAILURE_FIELDS.filter((key) => failure[key] !== undefined).map((key) => [key, failure[key]]),
+	);
 }
 
 export async function getRun(context: IExecuteFunctions, itemIndex: number): Promise<IDataObject> {
@@ -20,90 +124,34 @@ export async function getRun(context: IExecuteFunctions, itemIndex: number): Pro
 			{ itemIndex },
 		);
 	}
-	const data = await callTool(context, 'get_run', { run_id: runId, after_seq: afterSeq, limit });
-	const invalid = () =>
-		new NodeOperationError(context.getNode(), 'Whenever returned invalid run evidence.', {
+
+	const data = await callTool(
+		context,
+		'get_run',
+		{ run_id: runId, after_seq: afterSeq, limit },
+		itemIndex,
+	);
+	const page = readPage(data, runId, afterSeq, limit);
+	const successes = page?.events.filter((event) => event.type === 'run_succeeded') ?? [];
+	const output = successes.length > 1 ? undefined : outputOf(successes[0]);
+	if (!page || !output) {
+		throw new NodeOperationError(context.getNode(), 'Whenever returned invalid run evidence.', {
 			itemIndex,
 		});
-	const run = data.run;
-	if (
-		!objectValue(run) ||
-		run.runId !== runId ||
-		typeof run.workflowId !== 'string' ||
-		typeof run.version !== 'string' ||
-		typeof run.status !== 'string' ||
-		!['running', 'succeeded', 'failed', 'timed_out', 'cancelled'].includes(run.status) ||
-		!sequence(run.startedAt) ||
-		(run.endedAt !== undefined && !sequence(run.endedAt)) ||
-		!Array.isArray(data.events) ||
-		data.events.length > limit ||
-		!sequence(data.nextSeq) ||
-		data.nextSeq < afterSeq ||
-		typeof data.truncated !== 'boolean' ||
-		(data.truncated && data.nextSeq === afterSeq) ||
-		(data.observationComplete !== undefined && typeof data.observationComplete !== 'boolean')
-	)
-		throw invalid();
-	const events: IDataObject[] = [];
-	for (const event of data.events) {
-		if (
-			!objectValue(event) ||
-			event.runId !== runId ||
-			!sequence(event.seq) ||
-			event.seq <= afterSeq ||
-			event.seq > data.nextSeq ||
-			typeof event.type !== 'string'
-		)
-			throw invalid();
-		events.push(event);
 	}
-	const result: IDataObject = {
+
+	const { run, nextSeq, truncated, observationComplete } = page;
+	return {
 		runId,
 		workflowId: run.workflowId,
 		version: run.version,
 		status: run.status,
 		startedAt: run.startedAt,
-		nextSeq: data.nextSeq,
-		hasMoreEvents: data.truncated,
-		outputState: 'not_observed',
+		...(run.endedAt !== undefined && { endedAt: run.endedAt }),
+		...(run.failure !== undefined && { failure: knownFailureFields(run.failure) }),
+		nextSeq,
+		hasMoreEvents: truncated,
+		...(observationComplete !== undefined && { observationComplete }),
+		...output,
 	};
-	if (run.endedAt !== undefined) result.endedAt = run.endedAt;
-	if (data.observationComplete !== undefined) result.observationComplete = data.observationComplete;
-	if (run.failure !== undefined) {
-		if (!objectValue(run.failure)) throw invalid();
-		const failure: IDataObject = {};
-		for (const key of ['message', 'kind', 'code', 'detail', 'operation']) {
-			if (run.failure[key] !== undefined) {
-				if (typeof run.failure[key] !== 'string') throw invalid();
-				failure[key] = run.failure[key];
-			}
-		}
-		result.failure = failure;
-	}
-	const successes = events.filter((event) => event.type === 'run_succeeded');
-	if (successes.length > 1) throw invalid();
-	const success = successes[0];
-	if (success === undefined) return result;
-	if (success.outputOmitted !== undefined) {
-		if (
-			typeof success.outputOmitted !== 'string' ||
-			!['too_large', 'unserializable'].includes(success.outputOmitted) ||
-			success.outputJson !== undefined
-		)
-			throw invalid();
-		result.outputState = 'omitted';
-		result.outputOmitted = success.outputOmitted;
-	} else if (success.outputJson !== undefined) {
-		if (typeof success.outputJson !== 'string' || success.outputJson.length > 20000)
-			throw invalid();
-		try {
-			result.output = JSON.parse(success.outputJson);
-		} catch {
-			throw invalid();
-		}
-		result.outputState = 'available';
-	} else {
-		result.outputState = 'none';
-	}
-	return result;
 }
