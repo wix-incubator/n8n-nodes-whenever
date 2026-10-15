@@ -1,11 +1,17 @@
-import type { ICredentialType, INodeProperties } from 'n8n-workflow';
+import type { ICredentialTestRequest, ICredentialType, INodeProperties } from 'n8n-workflow';
 
-// eslint-disable-next-line @n8n/community-nodes/credential-test-required
 export class WheneverWebhookApi implements ICredentialType {
 	name = 'wheneverWebhookApi';
 	displayName = 'Whenever Webhook API';
 	documentationUrl = 'https://github.com/wix-incubator/n8n-nodes-whenever#credentials';
 	icon = 'file:../nodes/Whenever/whenever.svg' as const;
+	test: ICredentialTestRequest = {
+		request: {
+			method: 'HEAD',
+			url: '={{ $credentials.webhookUrl }}',
+		},
+	};
+
 	properties: INodeProperties[] = [
 		// eslint-disable-next-line @n8n/community-nodes/credential-unnecessary-password
 		{
