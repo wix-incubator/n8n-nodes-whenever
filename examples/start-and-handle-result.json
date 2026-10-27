@@ -15,7 +15,7 @@
     {
       "id": "start-workflow",
       "name": "Start workflow",
-      "type": "n8n-nodes-whenever.whenever",
+      "type": "@wix/n8n-nodes-whenever.whenever",
       "typeVersion": 1,
       "position": [
         220,
@@ -62,7 +62,7 @@
     {
       "id": "get-run",
       "name": "Get run",
-      "type": "n8n-nodes-whenever.whenever",
+      "type": "@wix/n8n-nodes-whenever.whenever",
       "typeVersion": 1,
       "position": [
         880,
