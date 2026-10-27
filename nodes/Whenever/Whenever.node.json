@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-whenever.whenever",
+	"node": "@wix/n8n-nodes-whenever.whenever",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Development"],

@@ -53,7 +53,7 @@ function context(
 		getNode: () => ({
 			id: 'whenever-1',
 			name: 'Whenever',
-			type: 'n8n-nodes-whenever.whenever',
+			type: '@wix/n8n-nodes-whenever.whenever',
 			typeVersion: 1,
 			position: [0, 0],
 			parameters: {},
