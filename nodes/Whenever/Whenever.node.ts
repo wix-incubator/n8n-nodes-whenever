@@ -347,7 +347,7 @@ export class Whenever implements INodeType {
 				type: 'options',
 				default: '',
 				required: true,
-				typeOptions: { loadOptionsMethod: 'getWebhooks', loadOptionsDependsOn: ['workflowId'] },
+				typeOptions: { loadOptionsMethod: 'getWebhooks', loadOptionsDependsOn: ['workflowId.value'] },
 				displayOptions: { show: { authentication: ['account'], operation: ['start'] } },
 				description:
 					'Enabled generic webhook to call. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',

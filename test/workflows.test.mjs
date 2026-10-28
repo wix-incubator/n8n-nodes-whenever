@@ -121,3 +121,17 @@ test('keeps missing workflow selection from making any account or webhook reques
 	);
 	assert.deepEqual(service.requests, []);
 });
+
+test('reloads the webhook list when another workflow is picked', () => {
+	const webhookField = new Whenever().description.properties.find(
+		({ name }) => name === 'webhookId',
+	);
+	const watched = (workflowId) =>
+		webhookField.typeOptions.loadOptionsDependsOn
+			.map((path) => path.split('.').reduce((value, key) => value?.[key], { workflowId }))
+			.join('|');
+	assert.notEqual(
+		watched({ __rl: true, mode: 'list', value: 'workflow-1' }),
+		watched({ __rl: true, mode: 'list', value: 'workflow-2' }),
+	);
+});
