@@ -71,7 +71,7 @@ function readPage(
 		objectValue(event) &&
 		event.runId === runId &&
 		sequence(event.seq) &&
-		event.seq > afterSeq &&
+		(event.seq > afterSeq || (afterSeq === 0 && event.seq === 0)) &&
 		event.seq <= nextSeq &&
 		typeof event.type === 'string';
 	const events = arrayOf(data.events, pageEvent);
@@ -125,13 +125,14 @@ export async function getRun(context: IExecuteFunctions, itemIndex: number): Pro
 		);
 	}
 
+	const requestLimit = afterSeq === 0 ? Math.max(2, limit) : limit;
 	const data = await callTool(
 		context,
 		'get_run',
-		{ run_id: runId, after_seq: afterSeq, limit },
+		{ run_id: runId, after_seq: afterSeq, limit: requestLimit },
 		itemIndex,
 	);
-	const page = readPage(data, runId, afterSeq, limit);
+	const page = readPage(data, runId, afterSeq, requestLimit);
 	const successes = page?.events.filter((event) => event.type === 'run_succeeded') ?? [];
 	const output = successes.length > 1 ? undefined : outputOf(successes[0]);
 	if (!page || !output) {

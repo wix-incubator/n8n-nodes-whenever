@@ -75,13 +75,16 @@ The node returns the run's `status`: `running`, `succeeded`, `failed`, `timed_ou
 - `none`: the run finished without returning anything.
 - `not_observed`: the result is not on this page yet.
 
-Get Run reads one page of up to **Event Limit** events and does not wait.
+Get Run reads one bounded page and does not wait.
+**Event Limit** sets the page size, with a minimum of two events on the first page.
+This lets **After Sequence** advance past the initial event at sequence zero.
 When `hasMoreEvents` is true, set **After Sequence** to `nextSeq` and read again.
 
 ## Wait for a result
 
 Import [examples/start-and-handle-result.json](examples/start-and-handle-result.json) into n8n 2.41.0 or later.
 It starts a workflow, checks the run every two seconds, and passes the result to **Use output**.
+A run takes a few seconds to appear after Start workflow accepts it, so **Get run** retries a failed read up to five times.
 
 1. Select your account credential on **Start workflow** and **Get run**.
 2. On **Start workflow**, choose your workflow, webhook, and input.
