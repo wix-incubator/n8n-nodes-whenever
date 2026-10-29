@@ -62,7 +62,7 @@ export async function callTool(
 		const refusal = objectValue(content) && objectValue(content.result) ? content.result : undefined;
 		if (refusal?.code === 'RUN_NOT_FOUND') {
 			throw fail(
-				'Whenever could not find this run for the connected account (RUN_NOT_FOUND). Check the run ID.',
+				'Whenever has no run with this ID for the connected account yet (RUN_NOT_FOUND). A run started from a webhook takes a few seconds to appear. If this continues, check the run ID.',
 			);
 		}
 		if (refusal?.code === 'NO_WIX_SESSION') {

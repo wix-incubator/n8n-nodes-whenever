@@ -84,6 +84,7 @@ When `hasMoreEvents` is true, set **After Sequence** to `nextSeq` and read again
 
 Import [examples/start-and-handle-result.json](examples/start-and-handle-result.json) into n8n 2.41.0 or later.
 It starts a workflow, checks the run every two seconds, and passes the result to **Use output**.
+A run takes a few seconds to appear after Start workflow accepts it, so **Get run** retries a failed read up to five times.
 
 1. Select your account credential on **Start workflow** and **Get run**.
 2. On **Start workflow**, choose your workflow, webhook, and input.

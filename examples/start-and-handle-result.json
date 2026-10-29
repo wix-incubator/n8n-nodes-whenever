@@ -74,7 +74,10 @@
         "runId": "={{ $json.runId }}",
         "afterSeq": "={{ $json.afterSeq }}",
         "eventLimit": 100
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 2000
     },
     {
       "id": "evaluate-result",

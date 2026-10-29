@@ -35,13 +35,14 @@ const snapshot = (overrides = {}) => ({
 });
 const execute = (context) => new Whenever().execute.call(context);
 
-test('explains a missing run without suggesting an expired login or exposing upstream text', async (t) => {
+test('explains a missing run as not visible yet without suggesting an expired login or exposing upstream text', async (t) => {
 	const response = toolResult({ code: 'RUN_NOT_FOUND', message: 'private upstream detail' });
 	response.body.result.isError = true;
 	const service = await mcpServer(t, () => response);
 	await assert.rejects(execute(service.context(parameters)), (error) => {
 		assert.match(error.message, /RUN_NOT_FOUND/);
 		assert.match(error.message, /run ID/i);
+		assert.match(error.message, /few seconds to appear/);
 		assert.doesNotMatch(error.message, /reconnect|private upstream detail/i);
 		return true;
 	});
