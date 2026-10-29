@@ -57,11 +57,20 @@ export async function callTool(
 	) {
 		throw fail('Whenever returned an invalid MCP response.');
 	}
+	const content = body.result.structuredContent;
 	if (body.result.isError === true) {
-		throw fail('Whenever refused the request. Check access and reconnect your account if needed.');
+		const refusal = objectValue(content) && objectValue(content.result) ? content.result : undefined;
+		if (refusal?.code === 'RUN_NOT_FOUND') {
+			throw fail(
+				'Whenever could not find this run for the connected account (RUN_NOT_FOUND). Check the run ID.',
+			);
+		}
+		if (refusal?.code === 'NO_WIX_SESSION') {
+			throw fail('Whenever refused account access (NO_WIX_SESSION). Reconnect your Whenever account.');
+		}
+		throw fail('Whenever refused the request. Check the node parameters and account access.');
 	}
 
-	const content = body.result.structuredContent;
 	if (!objectValue(content) || !objectValue(content.result)) {
 		throw fail('Whenever did not return structured data.');
 	}
