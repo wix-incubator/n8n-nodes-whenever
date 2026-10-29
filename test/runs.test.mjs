@@ -60,6 +60,42 @@ test('returns parsed output from a successful run', async (t) => {
 	});
 });
 
+test('reads a completed run whose first event has sequence zero', async (t) => {
+	const service = await mcpServer(t, () =>
+		toolResult(snapshot({ events: [{ runId: run.runId, seq: 0, type: 'run_started', ts: 1000 }, success] })),
+	);
+	const result = (await execute(service.context(parameters)))[0][0].json;
+	assert.equal(result.status, 'succeeded');
+	assert.equal(result.outputState, 'available');
+	assert.deepEqual(result.output, { score: 82 });
+});
+
+test('advances the first page when the configured event limit is one', async (t) => {
+	const events = [
+		{ runId: run.runId, seq: 0, type: 'run_started', ts: 1000 },
+		{ ...success, seq: 1 },
+	];
+	const service = await mcpServer(t, (request) => {
+		const page = events.slice(0, request.params.arguments.limit);
+		return toolResult(snapshot({
+			events: page,
+			nextSeq: page.at(-1).seq,
+			truncated: page.length < events.length,
+		}));
+	});
+	const result = (await execute(service.context({ ...parameters, eventLimit: 1 })))[0][0].json;
+	assert.equal(result.nextSeq, 1);
+	assert.equal(result.hasMoreEvents, false);
+	assert.deepEqual(result.output, { score: 82 });
+});
+
+test('rejects an event at the cursor of a later page', async (t) => {
+	const service = await mcpServer(t, () =>
+		toolResult(snapshot({ events: [success], nextSeq: 3 })),
+	);
+	await assert.rejects(execute(service.context({ ...parameters, afterSeq: 2 })), /invalid run evidence/);
+});
+
 test('returns a running snapshot without claiming output', async (t) => {
 	const service = await mcpServer(t, () =>
 		toolResult(
@@ -94,11 +130,11 @@ test('reads a later event page using the caller cursor', async (t) => {
 	const service = await mcpServer(t, () =>
 		toolResult(snapshot({ events: [{ ...success, seq: 102 }], nextSeq: 102 })),
 	);
-	const result = (await execute(service.context({ ...parameters, afterSeq: 100 })))[0][0].json;
+	const result = (await execute(service.context({ ...parameters, afterSeq: 100, eventLimit: 1 })))[0][0].json;
 	assert.deepEqual(service.requests[0].body.params.arguments, {
 		run_id: 'run-1',
 		after_seq: 100,
-		limit: 100,
+		limit: 1,
 	});
 	assert.equal(result.nextSeq, 102);
 	assert.deepEqual(result.output, { score: 82 });

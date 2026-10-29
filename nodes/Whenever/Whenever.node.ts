@@ -321,7 +321,8 @@ export class Whenever implements INodeType {
 				default: 100,
 				typeOptions: { minValue: 1, maxValue: 100, numberPrecision: 0 },
 				displayOptions: { show: { authentication: ['account'], operation: ['getRun'] } },
-				description: 'Maximum number of stored events to read in this request',
+					description:
+						'Maximum number of stored events to read per page. The first page reads at least two events.',
 			},
 			{
 				displayName: 'Workflow',
